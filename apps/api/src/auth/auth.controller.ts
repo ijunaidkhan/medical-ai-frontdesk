@@ -20,6 +20,7 @@ import { LOGIN_RATE_LIMIT, REFRESH_RATE_LIMIT } from './auth.constants.js';
 import { LoginDto, SwitchPracticeDto } from './auth.dto.js';
 import { AuthService } from './auth.service.js';
 import { CurrentAuth } from './current-auth.decorator.js';
+import { Authenticated } from '../tenancy/permissions.decorator.js';
 import { OriginGuard } from './origin.guard.js';
 import { Public } from './public.decorator.js';
 import { clearRefreshCookie, REFRESH_COOKIE_NAME, setRefreshCookie } from './refresh-cookie.js';
@@ -77,11 +78,13 @@ export class AuthController {
     clearRefreshCookie(response, this.secureCookie);
   }
 
+  @Authenticated()
   @Get('me')
   me(@CurrentAuth() auth: AuthContext): Promise<AuthProfile> {
     return this.auth.getProfile(auth);
   }
 
+  @Authenticated()
   @Post('switch-practice')
   @HttpCode(200)
   async switchPractice(

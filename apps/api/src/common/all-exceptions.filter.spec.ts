@@ -3,7 +3,7 @@ import type { PinoLogger } from 'nestjs-pino';
 import { AllExceptionsFilter } from './all-exceptions.filter.js';
 
 function setup() {
-  const logger = { setContext: vi.fn(), error: vi.fn() } as unknown as PinoLogger;
+  const logger = { setContext: vi.fn(), error: vi.fn(), warn: vi.fn() } as unknown as PinoLogger;
   const json = vi.fn();
   const status = vi.fn().mockReturnValue({ json });
   const response = { status, getHeader: vi.fn().mockReturnValue('req-id-12345') };
@@ -50,5 +50,31 @@ describe('AllExceptionsFilter', () => {
     expect(body.message).toBe('Internal server error');
     expect(JSON.stringify(body)).not.toContain('hunter2');
     expect(logger.error).toHaveBeenCalledWith({ err: failure }, 'Unhandled exception');
+  });
+
+  describe('two requests colliding in the database', () => {
+    it.each([
+      ['a deadlock', '40P01'],
+      ['a serialization failure', '40001'],
+    ])('answers 409 "try again" for %s, without leaking details, and logs a warning not an error', (_label, code) => {
+      const { filter, host, status, json, logger } = setup();
+      const failure = Object.assign(new Error('deadlock detected: Process 123 waits for ShareLock on relation secret_table'), { code });
+
+      filter.catch(failure, host);
+
+      expect(status).toHaveBeenCalledWith(409);
+      const body = json.mock.calls[0]?.[0] as { message: string; error: string };
+      expect(body.message).toBe('The request conflicted with another change. Please try again.');
+      expect(body.error).toBe('conflict');
+      expect(JSON.stringify(body)).not.toContain('secret_table');
+      expect(logger.warn).toHaveBeenCalled();
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it('still treats other database errors as server faults', () => {
+      const { filter, host, status } = setup();
+      filter.catch(Object.assign(new Error('boom'), { code: '57P01' }), host);
+      expect(status).toHaveBeenCalledWith(500);
+    });
   });
 });

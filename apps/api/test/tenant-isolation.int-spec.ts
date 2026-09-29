@@ -213,17 +213,131 @@ describe('tenant isolation (row-level security)', () => {
       ]);
     });
 
-    it('has no privilege to write practices or users at all', async () => {
-      await expect(
-        withPracticeContext(app, { practiceId: practiceA }, (trx) =>
-          trx.updateTable('practices').set({ name: 'hijacked' }).execute(),
-        ),
-      ).rejects.toThrow(/permission denied/);
+    it('has no privilege to write users at all', async () => {
       await expect(
         withPracticeContext(app, { practiceId: practiceA }, (trx) =>
           trx.updateTable('users').set({ display_name: 'hijacked' }).execute(),
         ),
       ).rejects.toThrow(/permission denied/);
+    });
+
+    describe('limited write access (practice and member management)', () => {
+      const namesOf = async () =>
+        Object.fromEntries((await owner.selectFrom('practices').select(['slug', 'name']).execute()).map((p) => [p.slug, p.name]));
+
+      it('can rename only its own practice: an update with no filter still cannot reach another practice', async () => {
+        await withPracticeContext(app, { practiceId: practiceA }, (trx) =>
+          trx.updateTable('practices').set({ name: 'Practice A (renamed)' }).execute(),
+        );
+        expect(await namesOf()).toEqual({ 'practice-a': 'Practice A (renamed)', 'practice-b': 'Practice B' });
+        await owner.updateTable('practices').set({ name: 'Practice A' }).where('id', '=', practiceA).execute();
+      });
+
+      it.each([
+        ['short name', { slug: 'stolen' }],
+        ['status', { status: 'suspended' as const }],
+        ['id', { id: '0190ffff-0000-7000-8000-000000000000' }],
+      ])('cannot change a practice’s %s', async (_label, change) => {
+        await expect(
+          withPracticeContext(app, { practiceId: practiceA }, (trx) => trx.updateTable('practices').set(change).execute()),
+        ).rejects.toThrow(/permission denied/);
+      });
+
+      it("can change a member's role and status in its own practice, and reaches no other practice's members", async () => {
+        const result = await withPracticeContext(app, { practiceId: practiceA }, (trx) =>
+          trx.updateTable('memberships').set({ role: 'viewer' }).where('user_id', '=', userBoth).executeTakeFirst(),
+        );
+        expect(result.numUpdatedRows).toBe(1n);
+        // userBoth is also a member of B: that membership must be untouched.
+        const rows = await owner.selectFrom('memberships').select(['practice_id', 'role']).where('user_id', '=', userBoth).execute();
+        expect(rows.find((r) => r.practice_id === practiceB)?.role).toBe('viewer'); // seeded as viewer in B
+        expect(rows.find((r) => r.practice_id === practiceA)?.role).toBe('viewer');
+        await owner.updateTable('memberships').set({ role: 'staff' }).where('user_id', '=', userBoth).where('practice_id', '=', practiceA).execute();
+
+        const crossTenant = await withPracticeContext(app, { practiceId: practiceA }, (trx) =>
+          trx.updateTable('memberships').set({ status: 'suspended' }).where('practice_id', '=', practiceB).executeTakeFirst(),
+        );
+        expect(crossTenant.numUpdatedRows).toBe(0n);
+      });
+
+      it.each([
+        ['who the member is', { user_id: '0190ffff-0000-7000-8000-000000000000' }],
+        ['which practice they belong to', { practice_id: '0190ffff-0000-7000-8000-000000000000' }],
+      ])('cannot change %s', async (_label, change) => {
+        await expect(
+          withPracticeContext(app, { practiceId: practiceA }, (trx) => trx.updateTable('memberships').set(change).execute()),
+        ).rejects.toThrow(/permission denied/);
+      });
+    });
+  });
+
+  describe('a practice always keeps an active owner (database guarantee)', () => {
+    let solo: string;
+    let ownerOne: string;
+    let ownerTwo: string;
+
+    beforeAll(async () => {
+      const { id } = await owner.insertInto('practices').values({ name: 'Owners Co', slug: 'owners-co', phone: null }).returning('id').executeTakeFirstOrThrow();
+      solo = id;
+      const users = await owner
+        .insertInto('users')
+        .values(['one', 'two'].map((n) => ({ email: `owner-${n}@example.test`, password_hash: 'x', display_name: n, locked_until: null, last_login_at: null })))
+        .returning(['id', 'email'])
+        .execute();
+      ownerOne = users.find((u) => u.email === 'owner-one@example.test')!.id;
+      ownerTwo = users.find((u) => u.email === 'owner-two@example.test')!.id;
+      await owner.insertInto('memberships').values({ practice_id: solo, user_id: ownerOne, role: 'owner' }).execute();
+    });
+
+    const change = (userId: string, set: { role?: 'admin'; status?: 'suspended' }) =>
+      owner.updateTable('memberships').set(set).where('practice_id', '=', solo).where('user_id', '=', userId).execute();
+
+    it('refuses to demote, suspend or remove the only owner', async () => {
+      await expect(change(ownerOne, { role: 'admin' })).rejects.toThrow(/at least one active owner/);
+      await expect(change(ownerOne, { status: 'suspended' })).rejects.toThrow(/at least one active owner/);
+      await expect(owner.deleteFrom('memberships').where('practice_id', '=', solo).where('user_id', '=', ownerOne).execute()).rejects.toThrow(
+        /at least one active owner/,
+      );
+    });
+
+    it('allows changes to non-owners, and to owners while another owner remains', async () => {
+      await owner.insertInto('memberships').values({ practice_id: solo, user_id: ownerTwo, role: 'owner' }).execute();
+      await change(ownerTwo, { role: 'admin' }); // owner one remains
+      await change(ownerTwo, { status: 'suspended' }); // an admin: irrelevant to the rule
+      await expect(change(ownerOne, { role: 'admin' })).rejects.toThrow(/at least one active owner/);
+    });
+
+    it('serialises two owners demoting each other at the same moment: exactly one succeeds', async () => {
+      await owner.updateTable('memberships').set({ role: 'owner', status: 'active' }).where('practice_id', '=', solo).where('user_id', '=', ownerTwo).execute();
+
+      const first = connect(database.ownerUrl, 1);
+      const second = connect(database.ownerUrl, 1);
+      try {
+        const demoteOne = first.transaction().execute(async (trx) => {
+          await trx.updateTable('memberships').set({ role: 'admin' }).where('practice_id', '=', solo).where('user_id', '=', ownerOne).execute();
+          await sql`select pg_sleep(0.6)`.execute(trx); // hold the transaction open so the other one overlaps
+        });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const demoteTwo = second.transaction().execute((trx) =>
+          trx.updateTable('memberships').set({ role: 'admin' }).where('practice_id', '=', solo).where('user_id', '=', ownerTwo).execute(),
+        );
+
+        const outcomes = await Promise.allSettled([demoteOne, demoteTwo]);
+        expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+        expect(outcomes.filter((o) => o.status === 'rejected')).toHaveLength(1);
+
+        const owners = await owner
+          .selectFrom('memberships')
+          .select('user_id')
+          .where('practice_id', '=', solo)
+          .where('role', '=', 'owner')
+          .where('status', '=', 'active')
+          .execute();
+        expect(owners).toHaveLength(1);
+      } finally {
+        await first.destroy();
+        await second.destroy();
+      }
     });
   });
 

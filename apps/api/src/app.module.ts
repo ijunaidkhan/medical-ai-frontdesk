@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AuditModule } from './audit/audit.module.js';
 import { AccessTokenGuard } from './auth/access-token.guard.js';
 import { DEFAULT_RATE_LIMIT } from './auth/auth.constants.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -10,6 +11,10 @@ import { validateEnv } from './config/env.validation.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthModule } from './health/health.module.js';
 import { LoggingModule } from './logging/logging.module.js';
+import { MembersModule } from './members/members.module.js';
+import { PracticesModule } from './practices/practices.module.js';
+import { PermissionsGuard } from './tenancy/permissions.guard.js';
+import { TenancyModule } from './tenancy/tenancy.module.js';
 
 @Module({
   imports: [
@@ -28,13 +33,19 @@ import { LoggingModule } from './logging/logging.module.js';
     LoggingModule,
     CommonModule,
     DatabaseModule,
+    TenancyModule,
     AuthModule,
     HealthModule,
+    PracticesModule,
+    MembersModule,
+    AuditModule,
   ],
   providers: [
-    // Guards run in the order they are listed: rate limit first, then authentication.
+    // Guards run in the order they are listed:
+    //   1. rate limit, 2. valid access token, 3. still-active member with the needed permission.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AccessTokenGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule {}

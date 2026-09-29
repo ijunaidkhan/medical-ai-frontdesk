@@ -27,21 +27,42 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const request = http.getRequest<Request>();
 
     const isHttpException = exception instanceof HttpException;
-    const statusCode = isHttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
+    // Two requests that collide in the database (a deadlock, or a serialization
+    // failure) are safe: PostgreSQL aborted one of them cleanly. Tell the client
+    // to try again instead of reporting a server fault.
+    const isRetryableConflict = !isHttpException && hasRetryableDatabaseCode(exception);
+    const statusCode = isHttpException
+      ? exception.getStatus()
+      : isRetryableConflict
+        ? HttpStatus.CONFLICT
+        : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    if (!isHttpException || statusCode >= 500) {
+    if (isRetryableConflict) {
+      this.logger.warn({ err: exception }, 'Request conflicted with another change in the database');
+    } else if (!isHttpException || statusCode >= 500) {
       this.logger.error({ err: exception }, 'Unhandled exception');
     }
 
     const body: ErrorResponseBody = {
       statusCode,
       error: HttpStatus[statusCode]?.replaceAll('_', ' ').toLowerCase() ?? 'error',
-      message: isHttpException && statusCode < 500 ? extractMessage(exception) : 'Internal server error',
+      message: isRetryableConflict
+        ? 'The request conflicted with another change. Please try again.'
+        : isHttpException && statusCode < 500
+          ? extractMessage(exception)
+          : 'Internal server error',
       requestId: response.getHeader(REQUEST_ID_HEADER)?.toString() ?? request.id?.toString(),
     };
 
     response.status(statusCode).json(body);
   }
+}
+
+/** PostgreSQL 40001 = serialization_failure, 40P01 = deadlock_detected. */
+const RETRYABLE_DATABASE_CODES: ReadonlySet<unknown> = new Set(['40001', '40P01']);
+
+function hasRetryableDatabaseCode(exception: unknown): boolean {
+  return typeof exception === 'object' && exception !== null && 'code' in exception && RETRYABLE_DATABASE_CODES.has(exception.code);
 }
 
 function extractMessage(exception: HttpException): string | string[] {

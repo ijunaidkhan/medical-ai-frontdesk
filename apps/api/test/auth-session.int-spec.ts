@@ -296,10 +296,14 @@ describe('sessions: refresh, logout and switching practice', () => {
       await refreshRequest(app, cookie).expect(200); // still signed in
     });
 
-    it('documents a known limit: an access token already issued stays valid until it expires (at most 10 minutes)', async () => {
+    it('also kills the access token at once: it is refused even though it has not expired', async () => {
       const { session, cookie } = await signIn(app, { email: alpha.ownerEmail });
-      await logoutRequest(app, cookie).expect(204);
       await meRequest(app, session.accessToken).expect(200);
+
+      await logoutRequest(app, cookie).expect(204);
+
+      const res = await meRequest(app, session.accessToken).expect(401);
+      expect(res.body.message).toBe('Access to this practice has ended');
     });
   });
 
@@ -403,8 +407,7 @@ describe('sessions: refresh, logout and switching practice', () => {
       it('a valid access token whose session has been ended', async () => {
         const { session, cookie } = await signIn(app, { email: multiEmail });
         await logoutRequest(app, cookie).expect(204);
-        await meRequest(app, session.accessToken).expect(200); // the token itself is still valid...
-        await switchRequest(app, session.accessToken, beta.practiceId).expect(401); // ...but cannot start a new session
+        await switchRequest(app, session.accessToken, beta.practiceId).expect(401); // cannot start a new session
       });
     });
   });

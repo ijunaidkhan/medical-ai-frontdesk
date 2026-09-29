@@ -2,6 +2,7 @@ import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '@frontdesk/shared';
 import { isEmail } from 'class-validator';
 import type { Kysely } from 'kysely';
 import { writeAuditLog } from '../audit/audit-log.js';
+import { isKnownTimezone } from '../common/timezone.js';
 import type { Database } from '../database/database.types.js';
 import type { PasswordHasher } from './password-hasher.js';
 
@@ -28,10 +29,6 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 63)
     .replace(/-+$/g, '');
-}
-
-function isKnownTimezone(value: string): boolean {
-  return value === 'UTC' || Intl.supportedValuesOf('timeZone').includes(value);
 }
 
 /** Returns a list of problems; empty means the input is acceptable. */

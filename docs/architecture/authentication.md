@@ -33,7 +33,7 @@ The signing key is `ACCESS_TOKEN_SECRET` (at least 32 random characters, checked
 **Refresh** `POST /api/auth/refresh` (cookie + allowed `Origin`, 60/min per IP)
 - Rotation: every use returns a new refresh token and revokes the old one. The session's absolute end time is carried along, so refreshing never extends a login past 12 hours.
 - **Theft detection:** presenting an already-rotated token more than 20 seconds after it was rotated revokes the *entire session* and is audited (`auth.refresh.reuse_detected`). Within 20 seconds it is treated as two browser tabs racing: the request is refused but the session and cookie are left alone.
-- The role, membership, user and practice status are re-read from the database on every refresh, so suspensions and role changes take effect within one access-token lifetime. If access was removed the session is revoked (`auth.refresh.denied`).
+- The role, membership, user and practice status are re-read from the database on every refresh. If access was removed the session is revoked (`auth.refresh.denied`). (Every other request is also checked against the database; see [authorization.md](authorization.md).)
 
 **Logout** `POST /api/auth/logout` — revokes the whole session; idempotent.
 
@@ -43,7 +43,7 @@ The signing key is `ACCESS_TOKEN_SECRET` (at least 32 random characters, checked
 
 ## Deny by default
 
-`AccessTokenGuard` is global: every route needs a valid access token unless it is marked `@Public()`. A route someone forgets to protect is closed, not open (`test/deny-by-default.e2e-spec.ts` proves this with a route that has no protection of its own). Use `@CurrentAuth()` to read the verified identity; never take the tenant from request input.
+`AccessTokenGuard` is global: every route needs a valid access token unless it is marked `@Public()`. A second global guard then requires every route to declare an access rule and checks the database that the person still has access (see [authorization.md](authorization.md)). A route someone forgets to protect is closed, not open (`test/deny-by-default.e2e-spec.ts` proves this with routes that have no protection of their own). Use `@CurrentAuth()` to read the verified identity; never take the tenant from request input.
 
 ## Tenant isolation in the database
 
@@ -55,7 +55,7 @@ Per-IP limits: 300/min default, 20/min login, 60/min refresh (health probes exem
 
 ## Audit events
 
-`auth.login.success`, `auth.login.failed` (reason code + email *fingerprint*, never the email or password), `auth.account.locked`, `auth.refresh.reuse_detected`, `auth.refresh.denied`, `auth.logout`, `auth.practice.switched`, `bootstrap.practice_created`. The table is append-only (privileges and triggers).
+`auth.login.success`, `auth.login.failed` (reason code + email *fingerprint*, never the email or password), `auth.account.locked`, `auth.refresh.reuse_detected`, `auth.refresh.denied`, `auth.logout`, `auth.practice.switched`, `bootstrap.practice_created`; and, from member and practice management, `practice.updated`, `member.role_changed`, `member.suspended`, `member.reactivated`. The table is append-only (privileges and triggers), and owners and admins can read their own practice's entries at `GET /api/audit-logs`.
 
 ## First account
 
@@ -63,8 +63,7 @@ Per-IP limits: 300/min default, 20/min login, 60/min refresh (health probes exem
 
 ## Known limits and deferred work
 
-- **Access tokens are stateless.** After logout, suspension or a role change, an already-issued access token keeps working for up to 10 minutes (refresh, `/me` and switch-practice do check the database). If a route later needs immediate revocation, add a per-request session check for it.
 - **No multi-factor authentication yet.** Required before real patient data; the 15-character minimum is the NIST allowance for single-factor passwords.
-- **Not built:** password reset and user invitations (need email delivery), user/role management endpoints, list/revoke own sessions, breached-password screening.
+- **Not built:** password reset and user invitations (need email delivery), list/revoke own sessions, breached-password screening.
 - **Rate-limit counters are in process memory.** With more than one API instance, move them to a shared store (e.g. Redis).
 - **Deployment:** TLS to the database, secrets from a secrets manager, and the production database owner role (it must be able to bypass row-level security, or explicit owner policies must be added, for migrations and bootstrap) are decisions for the deployment milestone.

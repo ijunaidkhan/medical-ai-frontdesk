@@ -36,11 +36,16 @@ The API is served under `/api`. Check it: `GET /api/health/live` (process up) an
 | `POST /api/auth/login` | public, 20/min per IP | Email + password; returns the session and sets the refresh cookie |
 | `POST /api/auth/refresh` | refresh cookie + allowed Origin | New access token, rotated refresh cookie |
 | `POST /api/auth/logout` | refresh cookie + allowed Origin | Ends the session |
-| `GET /api/auth/me` | access token | Current user, practice and role |
-| `POST /api/auth/switch-practice` | access token | Move to another practice the user belongs to |
+| `GET /api/auth/me` | any active member | Current user, practice and role |
+| `POST /api/auth/switch-practice` | any active member | Move to another practice the user belongs to |
+| `GET /api/practice` | `practice:read` (everyone) | The caller's own practice |
+| `PATCH /api/practice` | `practice:manage` (owner, admin) | Change name, time zone, phone |
+| `GET /api/members` | `members:read` (owner, admin, staff) | Members of the caller's practice |
+| `PATCH /api/members/:userId` | `members:manage` (owner, admin) | Change a member's role or status (admins are limited to staff and viewers) |
+| `GET /api/audit-logs` | `audit:read` (owner, admin) | The practice's audit trail, newest first, paged |
 | `GET /api/health/live`, `/ready` | public | Liveness / readiness |
 
-Every route needs an access token unless it is explicitly marked public. Details, limits and deferred work: [authentication](docs/architecture/authentication.md).
+Every route needs an access token and an explicit access rule, or it is refused; the practice a request acts in always comes from the verified token. Details, limits and deferred work: [authentication](docs/architecture/authentication.md) and [authorization](docs/architecture/authorization.md).
 
 ## Database
 

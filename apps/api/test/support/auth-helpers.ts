@@ -78,6 +78,15 @@ export function meRequest(app: TestApp, accessToken: string) {
   return request(app.getHttpServer()).get('/api/auth/me').set('Authorization', `Bearer ${accessToken}`);
 }
 
+/** Requests made as a signed-in user: `as(app, token).get('/api/practice')`. */
+export function as(app: TestApp, accessToken: string) {
+  const authed = (req: request.Test) => req.set('Authorization', `Bearer ${accessToken}`).set('X-Forwarded-For', uniqueIp());
+  return {
+    get: (path: string) => authed(request(app.getHttpServer()).get(path)),
+    patch: (path: string, body?: object) => authed(request(app.getHttpServer()).patch(path)).send(body),
+  };
+}
+
 export function switchRequest(app: TestApp, accessToken: string, practiceId: unknown) {
   return request(app.getHttpServer())
     .post('/api/auth/switch-practice')
