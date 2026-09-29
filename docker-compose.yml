@@ -1,0 +1,29 @@
+# Local development services. Start with:  docker compose up -d
+# Passwords come from your `.env` file (copy `.env.example`); nothing secret lives here.
+services:
+  postgres:
+    # PostgreSQL 18 (built-in uuidv7()) with the pgvector extension available
+    # for the knowledge-base milestone. The extension is not enabled yet.
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      # The bootstrap superuser doubles as the schema OWNER used only by migrations.
+      POSTGRES_USER: frontdesk_owner
+      POSTGRES_PASSWORD: ${DB_OWNER_PASSWORD:?Set DB_OWNER_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-frontdesk}
+      # Password for the low-privilege role the API connects as (see init script).
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?Set DB_APP_PASSWORD in .env}
+    ports:
+      # Bound to localhost only, so other machines on your network cannot reach it.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./infra/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U frontdesk_owner -d ${POSTGRES_DB:-frontdesk}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:

@@ -1,0 +1,31 @@
+{
+  "name": "medical-ai-frontdesk",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "npm@11.19.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:shared": "npm run build -w @frontdesk/shared",
+    "api:dev": "npm run build:shared && npm run start:dev -w @frontdesk/api",
+    "api:build": "npm run build:shared && npm run build -w @frontdesk/api",
+    "api:test": "npm run build:shared && npm test -w @frontdesk/api",
+    "api:test:integration": "npm run build:shared && npm run test:integration -w @frontdesk/api",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run build:shared && npm run db:migrate -w @frontdesk/api",
+    "db:migrate:down": "npm run build:shared && npm run db:migrate:down -w @frontdesk/api",
+    "db:migrate:status": "npm run build:shared && npm run db:migrate:status -w @frontdesk/api",
+    "web:start": "npm start -w @frontdesk/web",
+    "web:build": "npm run build -w @frontdesk/web",
+    "web:test": "npm test -w @frontdesk/web",
+    "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
+    "test": "npm run build:shared && npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "prettier": "^3.8.1",
+    "typescript": "~6.0.2"
+  }
+}
