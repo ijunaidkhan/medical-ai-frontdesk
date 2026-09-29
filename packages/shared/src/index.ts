@@ -1,2 +1,3 @@
-export * from './roles';
-export * from './health';
+export * from './roles.js';
+export * from './health.js';
+export * from './auth.js';

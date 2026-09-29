@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
-import { testDatabaseUrls } from './test/support/test-database.js';
+import { baseUrls, TEMPLATE_DATABASE, withDatabase } from './test/support/test-database.js';
 
-const urls = testDatabaseUrls();
+const urls = baseUrls();
 
 export default defineConfig({
   test: {
@@ -9,16 +9,23 @@ export default defineConfig({
     root: './',
     include: ['test/**/*.int-spec.ts'],
     globalSetup: ['./test/support/global-setup.ts'],
-    // All files share one database, so run them one at a time.
+    // Files are isolated by private databases, but hashing passwords is CPU heavy: keep it predictable.
     fileParallelism: false,
-    testTimeout: 15_000,
+    testTimeout: 20_000,
+    hookTimeout: 30_000,
     // Set before test files import AppModule, because ConfigModule validates at import time.
+    // Each file replaces the database name with its own private database (see createIsolatedDatabase).
     env: {
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
-      CORS_ORIGINS: '',
-      DATABASE_URL: urls.app,
-      MIGRATION_DATABASE_URL: urls.owner,
+      CORS_ORIGINS: 'http://localhost:4200',
+      DATABASE_URL: withDatabase(urls.app, TEMPLATE_DATABASE),
+      MIGRATION_DATABASE_URL: withDatabase(urls.owner, TEMPLATE_DATABASE),
+      // Test-only key for throwaway databases. Not a real secret.
+      ACCESS_TOKEN_SECRET: 'integration-tests-only-signing-key-0123456789',
+      // Lets tests pose as different client IPs (X-Forwarded-For) so that per-IP
+      // rate limits do not couple unrelated tests.
+      TRUST_PROXY_HOPS: '1',
     },
   },
 });

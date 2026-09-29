@@ -43,6 +43,9 @@ export class SqlFileMigrationProvider implements MigrationProvider {
   }
 }
 
-export function createMigrator(db: Kysely<unknown>, directory?: string): Migrator {
-  return new Migrator({ db, provider: new SqlFileMigrationProvider(directory) });
+/** Works with a connection of any table type: migrations only run raw SQL. */
+export function createMigrator<DB>(db: Kysely<DB>, directory?: string): Migrator {
+  // Kysely's Migrator is typed on Kysely<any>; the table types are irrelevant to it.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new Migrator({ db: db as Kysely<any>, provider: new SqlFileMigrationProvider(directory) });
 }

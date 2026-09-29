@@ -14,6 +14,8 @@ export default defineConfig({
       // These tests never query the database (the pool connects lazily), so a
       // placeholder is enough. Database behaviour is covered by the integration tests.
       DATABASE_URL: 'postgres://frontdesk_app:placeholder@127.0.0.1:1/unused',
+      // Test-only key. Not a real secret.
+      ACCESS_TOKEN_SECRET: 'e2e-tests-only-signing-key-0123456789abcdef',
     },
   },
 });

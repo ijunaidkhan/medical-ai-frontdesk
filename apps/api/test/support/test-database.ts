@@ -1,6 +1,10 @@
+import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
+import pg from 'pg';
 
-export const TEST_DATABASE = 'frontdesk_test';
+/** A fully migrated, never-used database that every test file copies. */
+export const TEMPLATE_DATABASE = 'frontdesk_test_template';
+export const TEST_DATABASE_PREFIX = 'frontdesk_test_';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
@@ -25,32 +29,78 @@ function requireUrl(name: string): URL {
   return new URL(value);
 }
 
-export interface TestDatabaseUrls {
-  /** Owner connection to the maintenance database, used to (re)create the test database. */
-  maintenance: string;
-  /** Owner connection to the test database, used for migrations and seeding. */
+export function withDatabase(url: string, database: string): string {
+  const copy = new URL(url);
+  copy.pathname = `/${database}`;
+  return copy.toString();
+}
+
+export interface BaseUrls {
+  /** Schema-owner credentials (creates databases, runs migrations, seeds data). */
   owner: string;
-  /** Runtime-role connection to the test database, the one whose isolation is under test. */
+  /** API runtime-role credentials: the ones whose isolation is under test. */
   app: string;
 }
 
 /**
- * Resolves connection URLs for the dedicated test database. Refuses non-local
- * hosts because the test setup drops and recreates the database.
+ * Credentials from the environment, checked to be local because the test setup
+ * creates and drops databases. The database name in these URLs is ignored.
  */
-export function testDatabaseUrls(): TestDatabaseUrls {
+export function baseUrls(): BaseUrls {
   loadLocalEnv();
   const owner = requireUrl('MIGRATION_DATABASE_URL');
   const app = requireUrl('DATABASE_URL');
-
   for (const url of [owner, app]) {
     if (!LOCAL_HOSTS.has(url.hostname)) {
       throw new Error(`Refusing to run integration tests against non-local host "${url.hostname}".`);
     }
   }
+  return { owner: owner.toString(), app: app.toString() };
+}
 
-  const maintenance = owner.toString();
-  owner.pathname = `/${TEST_DATABASE}`;
-  app.pathname = `/${TEST_DATABASE}`;
-  return { maintenance, owner: owner.toString(), app: app.toString() };
+/** Connection for CREATE/DROP DATABASE, made to the built-in "postgres" database. */
+async function withAdminClient<T>(work: (client: pg.Client) => Promise<T>): Promise<T> {
+  const client = new pg.Client({ connectionString: withDatabase(baseUrls().owner, 'postgres') });
+  await client.connect();
+  try {
+    return await work(client);
+  } finally {
+    await client.end();
+  }
+}
+
+export async function dropStaleTestDatabases(): Promise<void> {
+  await withAdminClient(async (client) => {
+    const { rows } = await client.query<{ datname: string }>(
+      `SELECT datname FROM pg_database WHERE datname LIKE 'frontdesk\\_test%'`,
+    );
+    for (const { datname } of rows) {
+      await client.query(`DROP DATABASE IF EXISTS "${datname}" WITH (FORCE)`);
+    }
+  });
+}
+
+export async function createTemplateDatabase(): Promise<string> {
+  await withAdminClient((client) => client.query(`CREATE DATABASE "${TEMPLATE_DATABASE}"`));
+  return withDatabase(baseUrls().owner, TEMPLATE_DATABASE);
+}
+
+export interface IsolatedDatabase {
+  name: string;
+  ownerUrl: string;
+  appUrl: string;
+  drop(): Promise<void>;
+}
+
+/** A private, freshly migrated database for one test file. Call drop() in afterAll. */
+export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
+  const name = `${TEST_DATABASE_PREFIX}${randomBytes(6).toString('hex')}`;
+  await withAdminClient((client) => client.query(`CREATE DATABASE "${name}" TEMPLATE "${TEMPLATE_DATABASE}"`));
+  const { owner, app } = baseUrls();
+  return {
+    name,
+    ownerUrl: withDatabase(owner, name),
+    appUrl: withDatabase(app, name),
+    drop: () => withAdminClient((client) => client.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`)).then(() => undefined),
+  };
 }

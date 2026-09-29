@@ -1,12 +1,17 @@
 import { Controller, Get, HttpStatus, Inject, Res } from '@nestjs/common';
 import type { LivenessResponse, ReadinessResponse } from '@frontdesk/shared';
+import { SkipThrottle } from '@nestjs/throttler';
 import { sql } from 'kysely';
 import { PinoLogger } from 'nestjs-pino';
 import type { Response } from 'express';
+import { Public } from '../auth/public.decorator.js';
 import { DB, type Db } from '../database/database.module.js';
 
 const READINESS_TIMEOUT_MS = 2_000;
 
+/** Probes come from load balancers: no login and no rate limit. They reveal nothing sensitive. */
+@Public()
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(

@@ -18,6 +18,7 @@
     "db:migrate": "npm run build:shared && npm run db:migrate -w @frontdesk/api",
     "db:migrate:down": "npm run build:shared && npm run db:migrate:down -w @frontdesk/api",
     "db:migrate:status": "npm run build:shared && npm run db:migrate:status -w @frontdesk/api",
+    "bootstrap": "npm run build:shared && npm run bootstrap -w @frontdesk/api",
     "web:start": "npm start -w @frontdesk/web",
     "web:build": "npm run build -w @frontdesk/web",
     "web:test": "npm test -w @frontdesk/web",

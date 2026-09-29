@@ -1,14 +1,22 @@
-import { Kysely, PostgresDialect, sql } from 'kysely';
+import { sql } from 'kysely';
 import { NO_MIGRATIONS } from 'kysely/migration';
-import pg from 'pg';
 import { createMigrator } from '../src/database/migrator.js';
+import type { Db } from '../src/database/database.module.js';
+import { connect } from './support/fixtures.js';
+import { createIsolatedDatabase, type IsolatedDatabase } from './support/test-database.js';
 
-// Uses the owner connection to the (already migrated) test database.
 describe('migrations', () => {
-  const db = new Kysely<unknown>({
-    dialect: new PostgresDialect({
-      pool: new pg.Pool({ connectionString: process.env['MIGRATION_DATABASE_URL'], max: 2 }),
-    }),
+  let database: IsolatedDatabase;
+  let db: Db;
+
+  beforeAll(async () => {
+    database = await createIsolatedDatabase();
+    db = connect(database.ownerUrl);
+  });
+
+  afterAll(async () => {
+    await db.destroy();
+    await database.drop();
   });
 
   async function tableCount(): Promise<number> {
@@ -17,10 +25,6 @@ describe('migrations', () => {
       where schemaname = 'public' and tablename in ('practices','users','memberships','refresh_tokens','audit_logs')`.execute(db);
     return Number(rows[0]?.n);
   }
-
-  afterAll(async () => {
-    await db.destroy();
-  });
 
   it('can be fully reverted and reapplied', async () => {
     const migrator = createMigrator(db);
@@ -33,5 +37,11 @@ describe('migrations', () => {
     const up = await migrator.migrateToLatest();
     expect(up.error).toBeUndefined();
     expect(await tableCount()).toBe(5);
+  });
+
+  it('is safe to run again when everything is already applied', async () => {
+    const result = await createMigrator(db).migrateToLatest();
+    expect(result.error).toBeUndefined();
+    expect(result.results ?? []).toHaveLength(0);
   });
 });

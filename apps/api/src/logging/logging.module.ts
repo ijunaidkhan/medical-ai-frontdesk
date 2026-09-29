@@ -44,7 +44,7 @@ export const LOG_REDACT_PATHS = [
             return id;
           },
           // Health probes fire every few seconds; logging them only adds noise.
-          autoLogging: { ignore: (req: IncomingMessage) => req.url?.startsWith('/health') ?? false },
+          autoLogging: { ignore: (req: IncomingMessage) => req.url?.startsWith('/api/health') ?? false },
           // Whitelist what we log. Never include headers, query strings or bodies,
           // since later milestones will carry patient data in them.
           serializers: {

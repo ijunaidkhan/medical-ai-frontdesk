@@ -46,6 +46,7 @@ export interface RefreshTokensTable {
   family_id: string;
   token_hash: Buffer;
   expires_at: Date;
+  session_expires_at: Date;
   revoked_at: Date | null;
   replaced_by_id: string | null;
   created_ip: string | null;

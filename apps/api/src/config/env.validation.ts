@@ -1,5 +1,5 @@
 import { plainToInstance, Transform } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsUrl, Max, Min, validateSync } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUrl, Max, MaxLength, Min, MinLength, validateSync } from 'class-validator';
 
 export const NODE_ENVS = ['development', 'test', 'production'] as const;
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
@@ -34,6 +34,28 @@ export class EnvironmentVariables {
     { message: 'DATABASE_URL must be a postgres:// or postgresql:// connection URL' },
   )
   DATABASE_URL!: string;
+
+  /**
+   * Key used to sign access tokens (HS256). At least 32 characters of random
+   * data; generate with: node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+   * Rotating it signs every user out. Never log it or commit it.
+   */
+  @IsString()
+  @MinLength(32)
+  @MaxLength(512)
+  ACCESS_TOKEN_SECRET!: string;
+
+  /**
+   * How many reverse proxies / load balancers sit in front of the API (0 = none).
+   * The client IP for rate limiting and audit logs is read from X-Forwarded-For
+   * only when this is above 0. Too low: everyone shares the balancer's IP.
+   * Too high: clients can spoof their IP and dodge rate limits.
+   */
+  @Transform(({ value }) => (value === undefined || value === '' ? 0 : Number(value)))
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  TRUST_PROXY_HOPS: number = 0;
 
   @IsOptional()
   @Transform(({ value }) =>

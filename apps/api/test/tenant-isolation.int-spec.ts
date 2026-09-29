@@ -4,15 +4,8 @@ import pg from 'pg';
 import { createDatabase, type Db } from '../src/database/database.module.js';
 import type { Database } from '../src/database/database.types.js';
 import { withPracticeContext } from '../src/database/practice-context.js';
-
-const APP_URL = process.env['DATABASE_URL']!;
-const OWNER_URL = process.env['MIGRATION_DATABASE_URL']!;
-
-function ownerConnection(): Db {
-  return new Kysely<Database>({
-    dialect: new PostgresDialect({ pool: new pg.Pool({ connectionString: OWNER_URL, max: 2 }) }),
-  });
-}
+import { connect } from './support/fixtures.js';
+import { createIsolatedDatabase, type IsolatedDatabase } from './support/test-database.js';
 
 async function countRows(db: Kysely<Database>, table: keyof Database): Promise<number> {
   const { rows } = await sql<{ n: string }>`select count(*)::text as n from ${sql.table(table)}`.execute(db);
@@ -20,6 +13,7 @@ async function countRows(db: Kysely<Database>, table: keyof Database): Promise<n
 }
 
 describe('tenant isolation (row-level security)', () => {
+  let database: IsolatedDatabase;
   let owner: Db;
   let app: Db;
   let practiceA: string;
@@ -29,8 +23,9 @@ describe('tenant isolation (row-level security)', () => {
   let userBoth: string; // member of both
 
   beforeAll(async () => {
-    owner = ownerConnection();
-    app = createDatabase(APP_URL);
+    database = await createIsolatedDatabase();
+    owner = connect(database.ownerUrl);
+    app = createDatabase(database.appUrl);
 
     const practices = await owner
       .insertInto('practices')
@@ -81,6 +76,7 @@ describe('tenant isolation (row-level security)', () => {
           family_id: crypto.randomUUID(),
           token_hash: Buffer.alloc(32, i + 1),
           expires_at: new Date(Date.now() + 3_600_000),
+          session_expires_at: new Date(Date.now() + 3_600_000),
           revoked_at: null,
           replaced_by_id: null,
           created_ip: null,
@@ -101,6 +97,7 @@ describe('tenant isolation (row-level security)', () => {
   afterAll(async () => {
     await app.destroy();
     await owner.destroy();
+    await database.drop();
   });
 
   describe('the runtime role', () => {
@@ -181,6 +178,7 @@ describe('tenant isolation (row-level security)', () => {
               family_id: crypto.randomUUID(),
               token_hash: Buffer.alloc(32, 9),
               expires_at: new Date(Date.now() + 3_600_000),
+              session_expires_at: new Date(Date.now() + 3_600_000),
               revoked_at: null,
               replaced_by_id: null,
               created_ip: null,
@@ -232,7 +230,7 @@ describe('tenant isolation (row-level security)', () => {
   describe('context handling', () => {
     it('does not leak to the next transaction on the same pooled connection', async () => {
       const singleConnection = new Kysely<Database>({
-        dialect: new PostgresDialect({ pool: new pg.Pool({ connectionString: APP_URL, max: 1 }) }),
+        dialect: new PostgresDialect({ pool: new pg.Pool({ connectionString: database.appUrl, max: 1 }) }),
       });
       try {
         const inside = await withPracticeContext(singleConnection, { practiceId: practiceA }, (trx) =>

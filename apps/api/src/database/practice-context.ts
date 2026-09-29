@@ -1,7 +1,6 @@
 import { type Kysely, sql, type Transaction } from 'kysely';
+import { isUuid } from '../common/uuid.js';
 import type { Database } from './database.types.js';
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface PracticeContext {
   /** The tenant. Must come from a verified credential, never from request input. */
@@ -22,10 +21,10 @@ export async function withPracticeContext<T>(
   context: PracticeContext,
   work: (trx: Transaction<Database>) => Promise<T>,
 ): Promise<T> {
-  if (!UUID_PATTERN.test(context.practiceId)) {
+  if (!isUuid(context.practiceId)) {
     throw new Error('withPracticeContext: practiceId must be a UUID');
   }
-  if (context.userId !== undefined && !UUID_PATTERN.test(context.userId)) {
+  if (context.userId !== undefined && !isUuid(context.userId)) {
     throw new Error('withPracticeContext: userId must be a UUID');
   }
 
