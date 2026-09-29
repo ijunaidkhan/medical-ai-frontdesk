@@ -1,0 +1,44 @@
+import type { Permission, Role } from '@frontdesk/shared';
+
+export const ROLE_LABELS: Readonly<Record<Role, string>> = {
+  owner: 'Owner',
+  admin: 'Administrator',
+  staff: 'Staff',
+  viewer: 'Viewer',
+};
+
+/** "Staff" is already plural, so a count of two is "2 Staff", not "2 Staffs". */
+export const ROLE_LABELS_PLURAL: Readonly<Record<Role, string>> = {
+  owner: 'Owners',
+  admin: 'Administrators',
+  staff: 'Staff',
+  viewer: 'Viewers',
+};
+
+export const PERMISSION_DESCRIPTIONS: Readonly<Record<Permission, string>> = {
+  'practice:read': 'View practice details',
+  'practice:manage': 'Change practice details',
+  'members:read': 'See who is on the team',
+  'members:manage': 'Manage team roles and access',
+  'audit:read': 'Review the activity log',
+};
+
+const AUDIT_LABELS: Readonly<Record<string, string>> = {
+  'auth.login.success': 'Signed in',
+  'auth.login.failed': 'Failed sign-in attempt',
+  'auth.account.locked': 'Account locked after failed attempts',
+  'auth.logout': 'Signed out',
+  'auth.practice.switched': 'Switched practice',
+  'auth.refresh.reuse_detected': 'Session ended: sign-in token reused',
+  'auth.refresh.denied': 'Session ended: access removed',
+  'practice.updated': 'Practice details changed',
+  'member.role_changed': 'Team member role changed',
+  'member.suspended': 'Team member suspended',
+  'member.reactivated': 'Team member reactivated',
+  'bootstrap.practice_created': 'Practice created',
+};
+
+/** A readable name for an audit event, falling back to the raw event name. */
+export function auditLabel(action: string): string {
+  return AUDIT_LABELS[action] ?? action;
+}

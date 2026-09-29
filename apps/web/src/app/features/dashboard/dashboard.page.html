@@ -1,0 +1,127 @@
+<h1>Dashboard</h1>
+@if (auth.user(); as user) {
+  <p class="muted welcome">Signed in as {{ user.displayName }} ({{ user.email }})</p>
+}
+
+<div class="grid">
+  <section class="card" aria-labelledby="practice-heading">
+    <h2 id="practice-heading">Your practice</h2>
+    @switch (practice().status) {
+      @case ('ready') {
+        @if (practice(); as state) {
+          @if (state.status === 'ready') {
+            <dl class="definition-list">
+              <dt>Name</dt>
+              <dd>{{ state.data.name }}</dd>
+              <dt>Short name</dt>
+              <dd>{{ state.data.slug }}</dd>
+              <dt>Time zone</dt>
+              <dd>{{ state.data.timezone }}</dd>
+              <dt>Phone</dt>
+              <dd>{{ state.data.phone ?? 'Not set' }}</dd>
+              <dt>Status</dt>
+              <dd>
+                <span class="badge" [class.badge-warn]="state.data.status !== 'active'">{{ state.data.status }}</span>
+              </dd>
+            </dl>
+          }
+        }
+      }
+      @case ('error') {
+        @if (practice(); as state) {
+          @if (state.status === 'error') {
+            <p class="alert alert-error" role="alert">{{ state.message }}</p>
+          }
+        }
+      }
+      @default {
+        <p class="muted" role="status">Loading…</p>
+      }
+    }
+  </section>
+
+  <section class="card" aria-labelledby="access-heading">
+    <h2 id="access-heading">Your access</h2>
+    @if (auth.role(); as role) {
+      <p>
+        Your role is <strong>{{ roleLabels[role] }}</strong>. You can:
+      </p>
+      <ul class="allowed">
+        @for (permission of allowed(); track permission) {
+          <li>{{ permissionDescriptions[permission] }}</li>
+        }
+      </ul>
+    }
+  </section>
+
+  @if (auth.can('members:read')) {
+    <section class="card" aria-labelledby="team-heading">
+      <h2 id="team-heading">Team</h2>
+      @switch (members().status) {
+        @case ('ready') {
+          @if (roleCounts().length > 0) {
+            <ul class="counts">
+              @for (entry of roleCounts(); track entry.role) {
+                <li>
+                  <span class="count">{{ entry.count }}</span>&ngsp;<span class="muted">{{
+                    entry.count === 1 ? roleLabels[entry.role] : roleLabelsPlural[entry.role]
+                  }}</span>
+                </li>
+              }
+            </ul>
+          }
+          <a routerLink="/team">See the whole team</a>
+        }
+        @case ('error') {
+          @if (members(); as state) {
+            @if (state.status === 'error') {
+              <p class="alert alert-error" role="alert">{{ state.message }}</p>
+            }
+          }
+        }
+        @default {
+          <p class="muted" role="status">Loading…</p>
+        }
+      }
+    </section>
+  }
+
+  @if (auth.can('audit:read')) {
+    <section class="card wide" aria-labelledby="activity-heading">
+      <h2 id="activity-heading">Recent activity</h2>
+      @switch (activity().status) {
+        @case ('ready') {
+          @if (activity(); as state) {
+            @if (state.status === 'ready') {
+              @if (state.data.items.length === 0) {
+                <p class="muted">Nothing has been recorded yet.</p>
+              } @else {
+                <ul class="activity">
+                  @for (entry of state.data.items; track entry.id) {
+                    <li>
+                      <span>{{ auditLabel(entry.action) }}</span>
+                      <span class="muted">
+                        {{ entry.actorName ?? 'Unknown user' }} · {{ formatDateTime(entry.occurredAt, auth.practice()?.timezone) }}
+                      </span>
+                    </li>
+                  }
+                </ul>
+              }
+              <a routerLink="/activity">See all activity</a>
+            }
+          }
+        }
+        @case ('error') {
+          @if (activity(); as state) {
+            @if (state.status === 'error') {
+              <p class="alert alert-error" role="alert">{{ state.message }}</p>
+            }
+          }
+        }
+        @default {
+          <p class="muted" role="status">Loading…</p>
+        }
+      }
+    </section>
+  }
+</div>

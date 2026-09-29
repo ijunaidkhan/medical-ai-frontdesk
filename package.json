@@ -19,9 +19,9 @@
     "db:migrate:down": "npm run build:shared && npm run db:migrate:down -w @frontdesk/api",
     "db:migrate:status": "npm run build:shared && npm run db:migrate:status -w @frontdesk/api",
     "bootstrap": "npm run build:shared && npm run bootstrap -w @frontdesk/api",
-    "web:start": "npm start -w @frontdesk/web",
-    "web:build": "npm run build -w @frontdesk/web",
-    "web:test": "npm test -w @frontdesk/web",
+    "web:start": "npm run build:shared && npm start -w @frontdesk/web",
+    "web:build": "npm run build:shared && npm run build -w @frontdesk/web",
+    "web:test": "npm run build:shared && npm test -w @frontdesk/web",
     "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
     "test": "npm run build:shared && npm run test --workspaces --if-present"
   },

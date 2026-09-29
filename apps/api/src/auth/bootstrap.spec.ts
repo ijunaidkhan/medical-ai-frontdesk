@@ -20,10 +20,10 @@ describe('validateBootstrapInput', () => {
 
   it.each([
     ['blank practice name', { practiceName: '   ' }, /Practice name/],
-    ['slug with capitals', { practiceSlug: 'Riverside' }, /slug/],
-    ['slug with spaces', { practiceSlug: 'river side' }, /slug/],
-    ['one-character slug', { practiceSlug: 'a' }, /slug/],
-    ['leading hyphen in slug', { practiceSlug: '-river' }, /slug/],
+    ['slug with capitals', { practiceSlug: 'Riverside' }, /short name/],
+    ['slug with spaces', { practiceSlug: 'river side' }, /short name/],
+    ['one-character slug', { practiceSlug: 'a' }, /short name/],
+    ['leading hyphen in slug', { practiceSlug: '-river' }, /short name/],
     ['unknown time zone', { timezone: 'Mars/Olympus' }, /time zone/],
     ['invalid email', { ownerEmail: 'not-an-email' }, /email/],
     ['blank owner name', { ownerDisplayName: '' }, /Owner name/],
@@ -56,6 +56,6 @@ describe('slugify', () => {
 
   it('can produce something too short or empty, which validation then rejects', () => {
     expect(slugify('!!!')).toBe('');
-    expect(validateBootstrapInput({ ...valid, practiceSlug: slugify('!!!') }).join()).toMatch(/slug/);
+    expect(validateBootstrapInput({ ...valid, practiceSlug: slugify('!!!') }).join()).toMatch(/short name/);
   });
 });

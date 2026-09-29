@@ -1,0 +1,45 @@
+<h1>Activity</h1>
+<p class="muted intro">A record of sign-ins and changes in {{ auth.practice()?.name }}, newest first.</p>
+
+@if (error(); as message) {
+  <p class="alert alert-error" role="alert">{{ message }}</p>
+}
+
+@if (entries().length > 0) {
+  <div class="card table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">Activity log</caption>
+      <thead>
+        <tr>
+          <th scope="col">When</th>
+          <th scope="col">What happened</th>
+          <th scope="col">Who</th>
+          <th scope="col">From</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (entry of entries(); track entry.id) {
+          <tr>
+            <td class="nowrap">{{ formatDateTime(entry.occurredAt, auth.practice()?.timezone) }}</td>
+            <td>
+              {{ auditLabel(entry.action) }}
+              @if (describe(entry); as detail) {
+                <span class="muted detail">({{ detail }})</span>
+              }
+            </td>
+            <td>{{ entry.actorName ?? 'Unknown user' }}</td>
+            <td class="nowrap">{{ entry.ip ?? '—' }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+} @else if (!loading() && !error()) {
+  <p class="muted">Nothing has been recorded yet.</p>
+}
+
+@if (loading()) {
+  <p class="muted" role="status">Loading…</p>
+} @else if (nextCursor()) {
+  <button type="button" class="btn more" (click)="loadMore()">Load more</button>
+}

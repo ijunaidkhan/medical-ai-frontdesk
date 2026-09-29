@@ -1,0 +1,48 @@
+<h1>Team</h1>
+<p class="muted intro">People with access to {{ auth.practice()?.name }}.</p>
+
+@switch (members().status) {
+  @case ('ready') {
+    @if (members(); as state) {
+      @if (state.status === 'ready') {
+        <div class="card table-wrap">
+          <table class="table">
+            <caption class="visually-hidden">Team members</caption>
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Email</th>
+                <th scope="col">Role</th>
+                <th scope="col">Status</th>
+                <th scope="col">Joined</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (member of state.data; track member.userId) {
+                <tr>
+                  <td>{{ member.displayName }}</td>
+                  <td>{{ member.email }}</td>
+                  <td>{{ roleLabels[member.role] }}</td>
+                  <td>
+                    <span class="badge" [class.badge-warn]="member.status !== 'active'">{{ member.status }}</span>
+                  </td>
+                  <td>{{ formatDate(member.joinedAt, auth.practice()?.timezone) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    }
+  }
+  @case ('error') {
+    @if (members(); as state) {
+      @if (state.status === 'error') {
+        <p class="alert alert-error" role="alert">{{ state.message }}</p>
+      }
+    }
+  }
+  @default {
+    <p class="muted" role="status">Loading…</p>
+  }
+}

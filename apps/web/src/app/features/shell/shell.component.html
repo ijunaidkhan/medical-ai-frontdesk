@@ -1,0 +1,51 @@
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">+</span>
+    <span>AI Front Desk</span>
+  </div>
+
+  @if (auth.practice(); as practice) {
+    <div class="practice">
+      @if (auth.practices().length > 1) {
+        <label for="practice-switch" class="visually-hidden">Practice</label>
+        <select id="practice-switch" class="input" [disabled]="switching()" (change)="switchPractice($event)">
+          @for (option of auth.practices(); track option.id) {
+            <option [value]="option.id" [selected]="option.id === practice.id">{{ option.name }}</option>
+          }
+        </select>
+      } @else {
+        <span class="practice-name">{{ practice.name }}</span>
+      }
+    </div>
+  }
+
+  @if (auth.user(); as user) {
+    <div class="person">
+      <span class="person-name">{{ user.displayName }}</span>
+      @if (auth.role(); as role) {
+        <span class="badge">{{ roleLabels[role] }}</span>
+      }
+      <button type="button" class="btn" (click)="signOut()">Sign out</button>
+    </div>
+  }
+</header>
+
+@if (switchError(); as message) {
+  <p class="alert alert-error banner" role="alert">{{ message }}</p>
+}
+
+<nav class="nav" aria-label="Main">
+  <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
+  @if (auth.can('members:read')) {
+    <a routerLink="/team" routerLinkActive="active">Team</a>
+  }
+  @if (auth.can('audit:read')) {
+    <a routerLink="/activity" routerLinkActive="active">Activity</a>
+  }
+</nav>
+
+<main id="main" class="content" tabindex="-1">
+  <router-outlet />
+</main>

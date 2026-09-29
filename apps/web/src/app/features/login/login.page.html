@@ -1,0 +1,60 @@
+<main class="login">
+  <section class="login-card card" aria-labelledby="login-title">
+    <div class="brand" aria-hidden="true">
+      <span class="brand-mark">+</span>
+      <span>AI Front Desk</span>
+    </div>
+
+    <h1 id="login-title">Sign in</h1>
+    <p class="muted intro">Use the account for your practice.</p>
+
+    <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+      @if (error(); as message) {
+        <p class="alert alert-error" role="alert">{{ message }}</p>
+      }
+
+      <div class="field">
+        <label for="email">Email</label>
+        <input
+          id="email"
+          class="input"
+          type="email"
+          formControlName="email"
+          autocomplete="username"
+          inputmode="email"
+          autofocus
+          [attr.aria-invalid]="emailProblem() ? 'true' : null"
+          [attr.aria-describedby]="emailProblem() ? 'email-problem' : null"
+        />
+        @if (emailProblem(); as problem) {
+          <p id="email-problem" class="field-error">{{ problem }}</p>
+        }
+      </div>
+
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="password-row">
+          <input
+            id="password"
+            class="input"
+            [type]="revealed() ? 'text' : 'password'"
+            formControlName="password"
+            autocomplete="current-password"
+            [attr.aria-invalid]="passwordProblem() ? 'true' : null"
+            [attr.aria-describedby]="passwordProblem() ? 'password-problem' : null"
+          />
+          <button type="button" class="btn btn-quiet" (click)="revealed.set(!revealed())" [attr.aria-pressed]="revealed()">
+            {{ revealed() ? 'Hide' : 'Show' }}
+          </button>
+        </div>
+        @if (passwordProblem(); as problem) {
+          <p id="password-problem" class="field-error">{{ problem }}</p>
+        }
+      </div>
+
+      <button class="btn btn-primary submit" type="submit" [disabled]="submitting()">
+        {{ submitting() ? 'Signing in…' : 'Sign in' }}
+      </button>
+    </form>
+  </section>
+</main>

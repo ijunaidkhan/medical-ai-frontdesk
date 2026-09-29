@@ -1,0 +1,15 @@
+.intro {
+  margin: 4px 0 20px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.detail {
+  margin-left: 4px;
+}
+
+.more {
+  margin-top: 16px;
+}

@@ -31,36 +31,51 @@ export function slugify(name: string): string {
     .replace(/-+$/g, '');
 }
 
+/**
+ * One check per answer, each returning a message for the person or null when
+ * the answer is fine. The interactive command runs them as each answer is
+ * typed; validateBootstrapInput runs them all again before anything is created.
+ */
+export const bootstrapFieldChecks = {
+  practiceName(value: string): string | null {
+    const length = value.trim().length;
+    return length >= 1 && length <= 120 ? null : 'Practice name must be 1-120 characters.';
+  },
+  practiceSlug(value: string): string | null {
+    return SLUG_PATTERN.test(value)
+      ? null
+      : 'Practice short name must be 2-63 characters: lowercase letters, digits and hyphens, starting with a letter or digit.';
+  },
+  timezone(value: string): string | null {
+    return isKnownTimezone(value)
+      ? null
+      : `Unknown time zone "${value}". Enter a place name such as "America/New_York", "Europe/London" or "Asia/Karachi" (or "UTC"), not the time of day.`;
+  },
+  ownerEmail(value: string): string | null {
+    return isEmail(value) && value.length <= 254 ? null : 'Owner email is not a valid email address.';
+  },
+  ownerDisplayName(value: string): string | null {
+    const length = value.trim().length;
+    return length >= 1 && length <= 120 ? null : 'Owner name must be 1-120 characters.';
+  },
+  password(value: string, ownerEmail: string): string | null {
+    if (value.length < PASSWORD_MIN_LENGTH) return `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
+    if (value.length > PASSWORD_MAX_LENGTH) return `Password must be at most ${PASSWORD_MAX_LENGTH} characters.`;
+    if (value.toLowerCase() === ownerEmail.toLowerCase()) return 'Password must not be the same as the email address.';
+    return null;
+  },
+};
+
 /** Returns a list of problems; empty means the input is acceptable. */
 export function validateBootstrapInput(input: BootstrapInput): string[] {
-  const problems: string[] = [];
-  const name = input.practiceName.trim();
-  if (name.length < 1 || name.length > 120) {
-    problems.push('Practice name must be 1-120 characters.');
-  }
-  if (!SLUG_PATTERN.test(input.practiceSlug)) {
-    problems.push('Practice slug must be 2-63 characters: lowercase letters, digits and hyphens, starting with a letter or digit.');
-  }
-  if (!isKnownTimezone(input.timezone)) {
-    problems.push(`Unknown time zone "${input.timezone}". Use an IANA name such as "America/New_York" or "UTC".`);
-  }
-  if (!isEmail(input.ownerEmail) || input.ownerEmail.length > 254) {
-    problems.push('Owner email is not a valid email address.');
-  }
-  const displayName = input.ownerDisplayName.trim();
-  if (displayName.length < 1 || displayName.length > 120) {
-    problems.push('Owner name must be 1-120 characters.');
-  }
-  if (input.password.length < PASSWORD_MIN_LENGTH) {
-    problems.push(`Password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
-  }
-  if (input.password.length > PASSWORD_MAX_LENGTH) {
-    problems.push(`Password must be at most ${PASSWORD_MAX_LENGTH} characters.`);
-  }
-  if (input.password.toLowerCase() === input.ownerEmail.toLowerCase()) {
-    problems.push('Password must not be the same as the email address.');
-  }
-  return problems;
+  return [
+    bootstrapFieldChecks.practiceName(input.practiceName),
+    bootstrapFieldChecks.practiceSlug(input.practiceSlug),
+    bootstrapFieldChecks.timezone(input.timezone),
+    bootstrapFieldChecks.ownerEmail(input.ownerEmail),
+    bootstrapFieldChecks.ownerDisplayName(input.ownerDisplayName),
+    bootstrapFieldChecks.password(input.password, input.ownerEmail),
+  ].filter((problem): problem is string => problem !== null);
 }
 
 /**

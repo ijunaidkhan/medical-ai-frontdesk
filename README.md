@@ -9,7 +9,7 @@ Multi-tenant SaaS AI medical receptionist. See [CLAUDE.md](CLAUDE.md) for produc
 | `apps/web` | Angular web app |
 | `apps/api` | NestJS API |
 | `packages/shared` | TypeScript types and constants shared by web and API (`@frontdesk/shared`) |
-| `docs/architecture` | Design notes, e.g. [authentication](docs/architecture/authentication.md) |
+| `docs/architecture` | Design notes: [authentication](docs/architecture/authentication.md), [authorization](docs/architecture/authorization.md), [web app](docs/architecture/web-app.md) |
 
 ## Getting started
 
@@ -24,8 +24,10 @@ npm run db:up             # start PostgreSQL in Docker
 npm run db:migrate        # create/upgrade the schema
 npm run bootstrap         # create the first practice and its owner (asks for a password)
 npm run api:dev           # API on http://localhost:3000 (builds shared first)
-npm run web:start         # web on http://localhost:4200
+npm run web:start         # web on http://localhost:4200 (forwards /api to the API)
 ```
+
+Open http://localhost:4200 and sign in with the account you created with `npm run bootstrap`. Start the API first: the web app talks to it through the dev server's proxy. Details: [web app](docs/architecture/web-app.md).
 
 The API is served under `/api`. Check it: `GET /api/health/live` (process up) and `GET /api/health/ready` (database reachable).
 

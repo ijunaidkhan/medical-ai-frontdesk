@@ -13,8 +13,15 @@ import { emitKeypressEvents } from 'node:readline';
 import { Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
 import type { Database } from '../database/database.types.js';
-import { BootstrapValidationError, createPracticeWithOwner, slugify, validateBootstrapInput } from './bootstrap.js';
+import {
+  BootstrapValidationError,
+  bootstrapFieldChecks,
+  createPracticeWithOwner,
+  slugify,
+  validateBootstrapInput,
+} from './bootstrap.js';
 import { PasswordHasher } from './password-hasher.js';
+import { askUntilValid } from './prompt-loop.js';
 
 function loadLocalEnv(): void {
   for (const path of ['.env', resolve(process.cwd(), '../../.env')]) {
@@ -100,17 +107,37 @@ async function main(): Promise<void> {
   const prompter = new Prompter();
   console.log('Create the first practice and its owner account.\n');
 
-  const practiceName = await prompter.ask('Practice name');
-  const practiceSlug = await prompter.ask('Practice short name (letters, digits, hyphens)', { fallback: slugify(practiceName) });
-  const timezone = await prompter.ask('Practice time zone', { fallback: 'UTC' });
-  const ownerDisplayName = await prompter.ask('Your name');
-  const ownerEmail = await prompter.ask('Your email (used to sign in)');
-  const password = await prompter.ask('Password (at least 15 characters; input is hidden)', { hidden: true });
-  const confirmation = await prompter.ask('Repeat password', { hidden: true });
+  // Each answer is checked as it is typed, so a slip only means re-entering that one answer.
+  const report = (problem: string) => console.log(`  ${problem}`);
+  const checks = bootstrapFieldChecks;
 
-  if (password !== confirmation) {
-    throw new BootstrapValidationError('The two passwords do not match.');
+  const practiceName = await askUntilValid(() => prompter.ask('Practice name'), checks.practiceName, report);
+  const practiceSlug = await askUntilValid(
+    () => prompter.ask('Practice short name (letters, digits, hyphens)', { fallback: slugify(practiceName) }),
+    checks.practiceSlug,
+    report,
+  );
+  console.log('The time zone is a place name, for example America/New_York, Europe/London or Asia/Karachi.');
+  const timezone = await askUntilValid(() => prompter.ask('Practice time zone', { fallback: 'UTC' }), checks.timezone, report);
+  const ownerDisplayName = await askUntilValid(() => prompter.ask('Your name'), checks.ownerDisplayName, report);
+  const ownerEmail = await askUntilValid(() => prompter.ask('Your email (used to sign in)'), checks.ownerEmail, report);
+
+  let password = '';
+  for (let attempt = 1; ; attempt++) {
+    password = await askUntilValid(
+      () => prompter.ask('Password (at least 15 characters; input is hidden)', { hidden: true }),
+      (value) => checks.password(value, ownerEmail),
+      report,
+    );
+    if (password === (await prompter.ask('Repeat password', { hidden: true }))) {
+      break;
+    }
+    report('The two passwords do not match. Try again.');
+    if (attempt >= 5) {
+      throw new BootstrapValidationError('The two passwords did not match.');
+    }
   }
+
   const input = { practiceName, practiceSlug, timezone, ownerEmail, ownerDisplayName, password };
   const problems = validateBootstrapInput(input);
   if (problems.length > 0) {
