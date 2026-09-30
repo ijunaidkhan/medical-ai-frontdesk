@@ -18,13 +18,13 @@ describe('role permissions', () => {
     ['admin', [...PERMISSIONS], []],
     [
       'staff',
-      ['practice:read', 'members:read', 'knowledge:read', 'tasks:read', 'tasks:manage'],
-      ['practice:manage', 'members:manage', 'audit:read', 'knowledge:manage'],
+      ['practice:read', 'members:read', 'knowledge:read', 'tasks:read', 'tasks:manage', 'ai:read'],
+      ['practice:manage', 'members:manage', 'audit:read', 'knowledge:manage', 'ai:configure'],
     ],
     [
       'viewer',
       ['practice:read'],
-      ['practice:manage', 'members:read', 'members:manage', 'audit:read', 'knowledge:read', 'knowledge:manage', 'tasks:read', 'tasks:manage'],
+      ['practice:manage', 'members:read', 'members:manage', 'audit:read', 'knowledge:read', 'knowledge:manage', 'tasks:read', 'tasks:manage', 'ai:read', 'ai:configure'],
     ],
   ])('%s has exactly the intended permissions', (role, allowed, denied) => {
     for (const permission of allowed) expect(hasPermission(role, permission)).toBe(true);
@@ -42,13 +42,14 @@ describe('role permissions', () => {
     }
   });
 
-  it('keeps every write and audit permission away from viewers', () => {
-    expect(ROLE_PERMISSIONS.viewer.filter((p) => p.endsWith(':manage') || p.startsWith('audit:'))).toEqual([]);
+  const isWriteOrAudit = (p: Permission) => p.endsWith(':manage') || p.endsWith(':configure') || p.startsWith('audit:');
+
+  it('keeps every write, configuration and audit permission away from viewers', () => {
+    expect(ROLE_PERMISSIONS.viewer.filter(isWriteOrAudit)).toEqual([]);
   });
 
-  it('keeps every write and audit permission away from staff EXCEPT working the task queue', () => {
+  it('keeps every write, configuration and audit permission away from staff EXCEPT working the task queue', () => {
     // Staff answer the phones and work callbacks, so tasks:manage is deliberate; nothing else is.
-    const writes = ROLE_PERMISSIONS.staff.filter((p) => p.endsWith(':manage') || p.startsWith('audit:'));
-    expect(writes).toEqual(['tasks:manage']);
+    expect(ROLE_PERMISSIONS.staff.filter(isWriteOrAudit)).toEqual(['tasks:manage']);
   });
 });

@@ -1,5 +1,16 @@
 import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
-import type { KnowledgeCategory, KnowledgeStatus, Role, TaskPriority, TaskStatus, TaskType } from '@frontdesk/shared';
+import type {
+  AfterHoursAction,
+  BusinessHours,
+  KnowledgeCategory,
+  KnowledgeStatus,
+  Role,
+  TaskPriority,
+  TaskStatus,
+  TaskType,
+  TransferPurpose,
+  UrgentAction,
+} from '@frontdesk/shared';
 
 // Hand-written to match apps/api/migrations. A migration that changes a table
 // must update its interface here; the integration tests catch drift in the
@@ -113,6 +124,33 @@ export interface StaffTasksTable {
   updated_at: Generated<Date>;
 }
 
+export interface TransferTargetsTable {
+  id: Generated<string>;
+  practice_id: string;
+  label: string;
+  phone: string;
+  purpose: TransferPurpose;
+  active: Generated<boolean>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface AiSettingsTable {
+  practice_id: string;
+  enabled: boolean;
+  greeting: string;
+  after_hours_action: AfterHoursAction;
+  after_hours_transfer_target_id: string | null;
+  emergency_message: string;
+  urgent_action: UrgentAction;
+  urgent_transfer_target_id: string | null;
+  extra_urgent_phrases: string[];
+  business_hours: BusinessHours;
+  updated_by: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface Database {
   practices: PracticesTable;
   users: UsersTable;
@@ -122,6 +160,8 @@ export interface Database {
   knowledge_sources: KnowledgeSourcesTable;
   knowledge_chunks: KnowledgeChunksTable;
   staff_tasks: StaffTasksTable;
+  transfer_targets: TransferTargetsTable;
+  ai_settings: AiSettingsTable;
 }
 
 export type Practice = Selectable<PracticesTable>;

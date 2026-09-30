@@ -16,6 +16,9 @@ Status: implemented (milestone 1, step 5). Code: `apps/api/src/tenancy`, `member
 | `tasks:read` (see the callback and message queue) | yes | yes | yes | |
 | `tasks:manage` (create, assign, complete tasks) | yes | yes | yes | |
 
+| `ai:read` (see how the AI receptionist is set up) | yes | yes | yes | |
+| `ai:configure` (change it, turn it on or off) | yes | yes | | |
+
 Staff hold `tasks:manage` on purpose: they answer the phones and work the callback queue. It is the only write permission staff have.
 
 The API enforces this. The web app imports the same table only to hide controls that would be refused anyway. Adding a role without deciding its permissions is a compile error.
@@ -63,6 +66,8 @@ The API's database role can update only `practices(name, timezone, phone)` and `
 | `GET /api/audit-logs?limit&cursor` | `audit:read` | Newest first; default 50, max 200; stable cursor paging |
 | `GET /api/knowledge`, `GET /api/knowledge/:id`, `GET /api/knowledge/search?q=` | `knowledge:read` | The AI receptionist's knowledge base (see [ai-receptionist.md](ai-receptionist.md)); search shows what the AI would find |
 | `GET /api/tasks?status&assignee&limit&cursor`, `GET /api/tasks/:id` | `tasks:read` | The task queue: default is open and in-progress, newest first; filter by status and by assignee (`me`, `unassigned`, or a person); cursor paging |
+| `GET /api/ai/settings`, `GET /api/ai/transfer-targets` | `ai:read` | The AI receptionist's configuration, with `ready` and `problems` (what still blocks turning it on) |
+| `PATCH /api/ai/settings`, `POST /api/ai/transfer-targets`, `PATCH /api/ai/transfer-targets/:id` | `ai:configure` | Partial updates. The AI cannot be turned on until a greeting, an emergency message, business hours and any needed active transfer number are set (409 lists what is missing); a number the settings use cannot be deactivated; audited by field names only |
 | `POST /api/tasks`, `PATCH /api/tasks/:id` | `tasks:manage` | Create and edit tasks, assign to an active member of the practice, change status (a finished task can only be reopened, and must be reopened before it is edited); never deleted, only cancelled; audited without the contact details |
 | `POST /api/knowledge`, `PATCH /api/knowledge/:id`, `POST /api/knowledge/:id/{approve,archive,restore}` | `knowledge:manage` | New entries are drafts; only an approved entry can be used, and editing approved wording withdraws the approval; audited |
 | `GET /api/auth/me`, `POST /api/auth/switch-practice` | any active member | |

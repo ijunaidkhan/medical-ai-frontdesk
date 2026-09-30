@@ -25,6 +25,8 @@ export const PERMISSION_DESCRIPTIONS: Readonly<Record<Permission, string>> = {
   'knowledge:manage': 'Write and approve the clinic information the AI receptionist uses',
   'tasks:read': 'See the task queue (callbacks and messages)',
   'tasks:manage': 'Create, assign and complete tasks',
+  'ai:read': 'See how the AI receptionist is set up',
+  'ai:configure': 'Change how the AI receptionist behaves and turn it on or off',
 };
 
 const AUDIT_LABELS: Readonly<Record<string, string>> = {
@@ -49,6 +51,11 @@ const AUDIT_LABELS: Readonly<Record<string, string>> = {
   'task.updated': 'Task edited',
   'task.assigned': 'Task assigned',
   'task.status_changed': 'Task status changed',
+  'ai.settings_updated': 'AI receptionist settings changed',
+  'ai.enabled': 'AI receptionist turned on',
+  'ai.disabled': 'AI receptionist turned off',
+  'ai.transfer_target_created': 'Transfer number added',
+  'ai.transfer_target_updated': 'Transfer number changed',
 };
 
 /** A readable name for an audit event, falling back to the raw event name. */

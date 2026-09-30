@@ -7,3 +7,4 @@ export * from './members.js';
 export * from './audit.js';
 export * from './knowledge.js';
 export * from './tasks.js';
+export * from './ai-settings.js';
