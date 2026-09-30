@@ -60,9 +60,11 @@ The API is served under `/api`. Check it: `GET /api/health/live` (process up) an
 | `GET /api/audit-logs` | `audit:read` (owner, admin) | The practice's audit trail, newest first, paged |
 | `GET /api/knowledge`, `/api/knowledge/:id`, `/api/knowledge/search?q=` | `knowledge:read` (owner, admin, staff) | The clinic information the AI receptionist may use; search shows what it would find |
 | `GET /api/ai/settings`, `/api/ai/transfer-targets` | `ai:read` (owner, admin, staff) | How the AI receptionist is set up, and what still blocks turning it on |
-| `PATCH /api/ai/settings`, `POST`/`PATCH /api/ai/transfer-targets` | `ai:configure` (owner, admin) | Greeting, business hours, after-hours and urgent-call handling, emergency message, transfer numbers, on/off (the AI cannot be turned on until it is safely set up) |
+| `PATCH /api/ai/settings`, `POST`/`PATCH /api/ai/transfer-targets` | `ai:configure` (owner, admin) | Greeting, business hours, after-hours and urgent-call handling, emergency message (911) and crisis message (988), transfer numbers, on/off (the AI cannot be turned on until it is safely set up) |
 | `GET /api/tasks`, `/api/tasks/:id` | `tasks:read` (owner, admin, staff) | The queue of callback and message requests (created by staff, and later by the AI receptionist) |
 | `POST /api/tasks`, `PATCH /api/tasks/:id` | `tasks:manage` (owner, admin, staff) | Create, assign, edit and complete tasks (never deleted, only cancelled) |
+| `POST /api/agent/test-conversations`, `.../:id/messages` | `ai:configure` (owner, admin) | Text test chat with the practice's AI receptionist (needs a configured language model: 503 until then) |
+| `GET /api/conversations`, `/api/conversations/:id` | `calls:read` (owner, admin, staff) | Review conversations and what the AI did; viewing a transcript is audited |
 | `POST`/`PATCH /api/knowledge`, `POST /api/knowledge/:id/approve`, `/archive`, `/restore` | `knowledge:manage` (owner, admin) | Write, approve and retire that information (only approved text is ever used) |
 | `GET /api/health/live`, `/ready` | public | Liveness / readiness |
 
