@@ -17,6 +17,7 @@ import { LoggingModule } from './logging/logging.module.js';
 import { MembersModule } from './members/members.module.js';
 import { PracticesModule } from './practices/practices.module.js';
 import { TasksModule } from './tasks/tasks.module.js';
+import { VoiceModule } from './voice/voice.module.js';
 import { PermissionsGuard } from './tenancy/permissions.guard.js';
 import { TenancyModule } from './tenancy/tenancy.module.js';
 
@@ -47,6 +48,7 @@ import { TenancyModule } from './tenancy/tenancy.module.js';
     TasksModule,
     AiModule,
     AgentModule,
+    VoiceModule,
   ],
   providers: [
     // Guards run in the order they are listed:

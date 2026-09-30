@@ -173,9 +173,26 @@ export interface ConversationsTable {
   handoff_target_id: string | null;
   started_by: string | null;
   model: string | null;
+  /** Phone calls: the provider's id for the call (makes repeated webhooks harmless), who called, which of our numbers, how long. */
+  provider_call_sid: string | null;
+  caller_number: string | null;
+  phone_number_id: string | null;
+  duration_seconds: number | null;
   turn_count: Generated<number>;
   started_at: Generated<Date>;
   ended_at: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface PhoneNumbersTable {
+  id: Generated<string>;
+  practice_id: string;
+  e164: string;
+  provider: Generated<'twilio'>;
+  provider_sid: string | null;
+  label: Generated<string>;
+  active: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -217,6 +234,7 @@ export interface Database {
   staff_tasks: StaffTasksTable;
   transfer_targets: TransferTargetsTable;
   ai_settings: AiSettingsTable;
+  phone_numbers: PhoneNumbersTable;
   conversations: ConversationsTable;
   conversation_turns: ConversationTurnsTable;
   tool_invocations: ToolInvocationsTable;

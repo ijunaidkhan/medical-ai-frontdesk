@@ -118,6 +118,53 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('phone calls', () => {
+    const TOKEN = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+    const VOICE = { VOICE_PROVIDER: 'twilio', TWILIO_AUTH_TOKEN: TOKEN, PUBLIC_BASE_URL: 'https://calls.example.org' };
+
+    it('is off by default and needs nothing else', () => {
+      const env = validateEnv(REQUIRED);
+      expect(env.VOICE_PROVIDER).toBe('none');
+      expect(env.TWILIO_AUTH_TOKEN).toBeUndefined();
+      expect(env.PUBLIC_BASE_URL).toBeUndefined();
+    });
+
+    it('treats blank values (an unedited .env) as not set', () => {
+      const env = validateEnv({ ...REQUIRED, VOICE_PROVIDER: '', TWILIO_AUTH_TOKEN: '', PUBLIC_BASE_URL: '' });
+      expect(env.VOICE_PROVIDER).toBe('none');
+    });
+
+    it('accepts Twilio with a token and a public address, and drops a trailing slash', () => {
+      expect(validateEnv({ ...REQUIRED, ...VOICE })).toMatchObject({ VOICE_PROVIDER: 'twilio', TWILIO_AUTH_TOKEN: TOKEN, PUBLIC_BASE_URL: 'https://calls.example.org' });
+      expect(validateEnv({ ...REQUIRED, ...VOICE, PUBLIC_BASE_URL: 'https://calls.example.org///' }).PUBLIC_BASE_URL).toBe('https://calls.example.org');
+    });
+
+    it.each([
+      ['no token', { TWILIO_AUTH_TOKEN: undefined }, /TWILIO_AUTH_TOKEN/],
+      ['a blank token', { TWILIO_AUTH_TOKEN: '' }, /TWILIO_AUTH_TOKEN/],
+      ['a token that is obviously too short', { TWILIO_AUTH_TOKEN: 'abc' }, /TWILIO_AUTH_TOKEN/],
+      ['no public address', { PUBLIC_BASE_URL: undefined }, /PUBLIC_BASE_URL/],
+      ['a public address that is not a URL', { PUBLIC_BASE_URL: 'calls.example.org' }, /PUBLIC_BASE_URL/],
+      ['a public address with a query string', { PUBLIC_BASE_URL: 'https://calls.example.org/?a=1' }, /PUBLIC_BASE_URL/],
+    ])('refuses Twilio with %s', (_name, change, message) => {
+      expect(() => validateEnv({ ...REQUIRED, ...VOICE, ...change })).toThrow(message);
+    });
+
+    it('refuses an unknown provider', () => {
+      expect(() => validateEnv({ ...REQUIRED, VOICE_PROVIDER: 'vonage' })).toThrow(/VOICE_PROVIDER/);
+    });
+
+    it('never echoes the token in an error message', () => {
+      try {
+        validateEnv({ ...REQUIRED, ...VOICE, PUBLIC_BASE_URL: 'not a url' });
+        throw new Error('should have been refused');
+      } catch (error) {
+        expect((error as Error).message).toMatch(/PUBLIC_BASE_URL/);
+        expect((error as Error).message).not.toContain(TOKEN);
+      }
+    });
+  });
+
   it('rejects an out-of-range port', () => {
     expect(() => validateEnv({ ...REQUIRED, PORT: '70000' })).toThrow(/PORT/);
   });

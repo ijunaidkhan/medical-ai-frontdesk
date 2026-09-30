@@ -3,6 +3,7 @@ import { IsIn, IsInt, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min,
 
 export const NODE_ENVS = ['development', 'test', 'production'] as const;
 export const LLM_PROVIDERS = ['none', 'anthropic'] as const;
+export const VOICE_PROVIDERS = ['none', 'twilio'] as const;
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
 
 /**
@@ -82,6 +83,37 @@ export class EnvironmentVariables {
   @IsString()
   @Matches(/^[A-Za-z0-9._-]{1,100}$/, { message: 'ANTHROPIC_MODEL must be a model id such as claude-sonnet-5-5' })
   ANTHROPIC_MODEL: string = 'claude-sonnet-5-5';
+
+  /**
+   * Whether the API answers phone calls. "none" (the default) keeps every /api/voice
+   * route switched off (404); "twilio" needs the two settings below.
+   */
+  @Transform(({ value }) => (value === undefined || value === '' ? 'none' : value))
+  @IsIn(VOICE_PROVIDERS)
+  VOICE_PROVIDER: (typeof VOICE_PROVIDERS)[number] = 'none';
+
+  /**
+   * Twilio's auth token, used ONLY to check that a request really came from Twilio
+   * (its signature). A secret: environment only, never logged, never returned, never committed.
+   */
+  @Transform(({ value }) => (value === '' ? undefined : value))
+  @ValidateIf((config: EnvironmentVariables) => config.VOICE_PROVIDER === 'twilio')
+  @IsString()
+  @MinLength(20, { message: 'TWILIO_AUTH_TOKEN is required when VOICE_PROVIDER=twilio' })
+  @MaxLength(256)
+  TWILIO_AUTH_TOKEN?: string;
+
+  /**
+   * The public address Twilio uses to reach this API (for example the https address of
+   * your tunnel or load balancer), without a trailing slash. Twilio signs the exact
+   * address it called, so the check must be built from this setting and never from
+   * anything in the request. Required when VOICE_PROVIDER=twilio.
+   */
+  @Transform(({ value }) => (value === '' ? undefined : typeof value === 'string' ? value.replace(/\/+$/, '') : value))
+  @ValidateIf((config: EnvironmentVariables) => config.VOICE_PROVIDER === 'twilio')
+  @IsUrl({ protocols: ['http', 'https'], require_tld: false, require_protocol: true }, { message: 'PUBLIC_BASE_URL must be the public http(s) address of this API' })
+  @Matches(/^[^?#]*$/, { message: 'PUBLIC_BASE_URL must not contain a query string or fragment' })
+  PUBLIC_BASE_URL?: string;
 
   @IsOptional()
   @Transform(({ value }) =>

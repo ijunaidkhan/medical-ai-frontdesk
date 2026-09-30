@@ -20,6 +20,8 @@ describe('auditLabel', () => {
     ['knowledge.approved', 'Knowledge entry approved'],
     ['task.status_changed', 'Task status changed'],
     ['ai.enabled', 'AI receptionist turned on'],
+    ['phone_number.added', 'Phone number connected'],
+    ['phone_number.disabled', 'Phone number switched off'],
     ['conversation.escalated', 'Emergency or urgent call handled by the safety rules'],
     ['conversation.viewed', 'Conversation transcript viewed'],
   ])('describes %s in plain words', (action, label) => {
