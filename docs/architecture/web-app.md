@@ -29,6 +29,10 @@ Pages are lazy-loaded; the first download is about 73 kB compressed.
 
 The browser calls the API at the same address it loaded the app from (`/api/...`). In development the Angular dev server proxies `/api` to the API on port 3000 (`apps/web/proxy.conf.json`); there is no CORS and the refresh cookie (`SameSite=Strict`, path `/api/auth`) just works. **In production the web app and `/api` must be served from the same host** (for example, a load balancer routing `/api/*` to the API), and `CORS_ORIGINS` must list that origin, because the API's CSRF check on refresh and logout requires an allowed `Origin`.
 
+That production shape is provided and tested: `docker compose --profile full up` runs the web app behind nginx (`infra/docker/nginx`), which serves the built files, forwards `/api/` to the API container, overwrites `X-Forwarded-For` with the real client address (the API is set to trust exactly one proxy), and adds security headers. The same 23-step login, refresh, cross-site refusal, practice-switch and logout run was passed through it.
+
+**Content-Security-Policy.** nginx sends `script-src 'self'` (only the app's own files may run scripts) and `style-src 'self' 'unsafe-inline'` (Angular adds component styles at run time). To make that policy possible, the production build turns off Angular's critical-CSS inlining, which would otherwise add an inline `<script>` to `index.html` that the policy blocks and leave the page unstyled.
+
 ## Permissions in the interface
 
 The menu, page guards and dashboard sections use `hasPermission` from `@frontdesk/shared` so people are not shown things that would be refused. That is a convenience only: the API checks the database on every request and refuses anything not allowed, whatever the browser does. The dashboard does not even request the team or activity data for a role that may not see it.

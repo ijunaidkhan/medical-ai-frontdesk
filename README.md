@@ -29,6 +29,19 @@ npm run web:start         # web on http://localhost:4200 (forwards /api to the A
 
 Open http://localhost:4200 and sign in with the account you created with `npm run bootstrap`. Start the API first: the web app talks to it through the dev server's proxy. Details: [web app](docs/architecture/web-app.md).
 
+### Or run everything in Docker
+
+Instead of the two dev servers, the whole stack can run in containers (database, API, and the web app behind nginx):
+
+```bash
+docker compose --profile full up -d --build   # first build takes a few minutes
+docker compose --profile tools run --rm migrate   # apply migrations (once, and after upgrades)
+```
+
+Then open http://localhost:8080. Only the web port is published; the API is reachable only through nginx, which serves the app, forwards `/api`, and sends strict security headers (including a Content-Security-Policy that allows only the app's own scripts). Stop it with `docker compose --profile full down`. This mode is for trying the deployment shape locally; day-to-day development uses `npm run api:dev` and `npm run web:start`.
+
+Because Docker Compose builds the database URL from your passwords, avoid `@`, `:` and `/` in `DB_APP_PASSWORD` and `DB_OWNER_PASSWORD`.
+
 The API is served under `/api`. Check it: `GET /api/health/live` (process up) and `GET /api/health/ready` (database reachable).
 
 ## API

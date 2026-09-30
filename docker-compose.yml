@@ -1,5 +1,9 @@
-# Local development services. Start with:  docker compose up -d
-# Passwords come from your `.env` file (copy `.env.example`); nothing secret lives here.
+# Local development services. Passwords come from your `.env` file (copy
+# `.env.example`); nothing secret lives here.
+#
+#   docker compose up -d                       database only (what `npm run db:up` runs)
+#   docker compose --profile full up -d --build   whole stack in containers: http://localhost:8080
+#   docker compose --profile tools run --rm migrate   apply database migrations from a container
 services:
   postgres:
     # PostgreSQL 18 (built-in uuidv7()) with the pgvector extension available
@@ -24,6 +28,61 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  api:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # "development" keeps the refresh cookie usable over plain http://localhost.
+      # A real deployment runs with NODE_ENV=production behind HTTPS.
+      NODE_ENV: development
+      PORT: "3000"
+      LOG_LEVEL: info
+      # The API connects as the low-privilege role, never as the owner.
+      DATABASE_URL: postgres://frontdesk_app:${DB_APP_PASSWORD:?Set DB_APP_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-frontdesk}
+      ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET:?Set ACCESS_TOKEN_SECRET in .env}
+      # Exactly one proxy (the web container's nginx) sits in front of the API.
+      TRUST_PROXY_HOPS: "1"
+      CORS_ORIGINS: http://localhost:8080
+    # Not published to the host: the browser reaches it only through the web container.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 5s
+
+  web:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  # One-off commands that need the database OWNER's credentials (migrations and
+  # the first-account command). Kept out of the long-running api service on purpose.
+  migrate:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MIGRATION_DATABASE_URL: postgres://frontdesk_owner:${DB_OWNER_PASSWORD:?Set DB_OWNER_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-frontdesk}
+    command: ["node", "dist/database/migrate-cli.js", "up"]
 
 volumes:
   postgres_data:

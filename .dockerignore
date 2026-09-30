@@ -1,0 +1,14 @@
+# Keep the build context small and, above all, keep secrets out of images.
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+**/.angular
+**/coverage
+**/*.log
+.vscode
+.idea
+docs
