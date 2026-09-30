@@ -27,7 +27,7 @@
                 <span class="muted detail">({{ detail }})</span>
               }
             </td>
-            <td>{{ entry.actorName ?? 'Unknown user' }}</td>
+            <td>{{ actorLabel(entry) }}</td>
             <td class="nowrap">{{ entry.ip ?? '—' }}</td>
           </tr>
         }

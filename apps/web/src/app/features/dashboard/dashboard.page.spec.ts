@@ -27,9 +27,9 @@ const member = (n: number, role: Role, status: 'active' | 'suspended' = 'active'
 const AUDIT: AuditLogPage = {
   nextCursor: 'more',
   items: [
-    { id: 'a1', action: 'auth.login.success', actorUserId: 'u1', actorName: 'Jane Smith', targetType: null, targetId: null, ip: '203.0.113.7', requestId: null, metadata: {}, occurredAt: '2026-09-29T18:05:00.000Z' },
-    { id: 'a2', action: 'member.role_changed', actorUserId: 'u1', actorName: null, targetType: 'user', targetId: 'u2', ip: null, requestId: null, metadata: {}, occurredAt: '2026-09-29T17:00:00.000Z' },
-    { id: 'a3', action: 'something.new', actorUserId: null, actorName: null, targetType: null, targetId: null, ip: null, requestId: null, metadata: {}, occurredAt: '2026-09-29T16:00:00.000Z' },
+    { id: 'a1', action: 'auth.login.success', actorType: 'user', actorUserId: 'u1', actorName: 'Jane Smith', targetType: null, targetId: null, ip: '203.0.113.7', requestId: null, metadata: {}, occurredAt: '2026-09-29T18:05:00.000Z' },
+    { id: 'a2', action: 'member.role_changed', actorType: 'user', actorUserId: 'u1', actorName: null, targetType: 'user', targetId: 'u2', ip: null, requestId: null, metadata: {}, occurredAt: '2026-09-29T17:00:00.000Z' },
+    { id: 'a3', action: 'something.new', actorType: 'ai', actorUserId: null, actorName: null, targetType: null, targetId: null, ip: null, requestId: null, metadata: {}, occurredAt: '2026-09-29T16:00:00.000Z' },
   ],
 };
 
@@ -101,6 +101,7 @@ describe('DashboardPage', () => {
       expect(rows[1]).toContain('Team member role changed');
       expect(rows[1]).toContain('Unknown user');
       expect(rows[2]).toContain('something.new'); // an event with no friendly name shows as is
+      expect(rows[2]).toContain('AI receptionist'); // and an action by the AI is named as the AI
       expect(root().querySelector('a[href="/activity"]')).not.toBeNull();
       expect(root().querySelector('a[href="/team"]')).not.toBeNull();
     });

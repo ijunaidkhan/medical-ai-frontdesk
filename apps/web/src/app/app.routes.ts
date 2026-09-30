@@ -26,6 +26,12 @@ export const routes: Routes = [
         loadComponent: () => import('./features/team/team.page').then((m) => m.TeamPage),
       },
       {
+        path: 'ai',
+        title: 'AI receptionist · AI Front Desk',
+        canActivate: [permissionGuard('ai:read')],
+        loadComponent: () => import('./features/ai-settings/ai-settings.page').then((m) => m.AiSettingsPage),
+      },
+      {
         path: 'activity',
         title: 'Activity · AI Front Desk',
         canActivate: [permissionGuard('audit:read')],

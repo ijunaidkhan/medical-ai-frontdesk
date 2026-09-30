@@ -5,7 +5,7 @@ import { loadForPractice } from '../../core/api/load-state';
 import { PracticeApi } from '../../core/api/practice-api';
 import { AuthService } from '../../core/auth/auth.service';
 import { formatDateTime } from '../../core/format';
-import { auditLabel, PERMISSION_DESCRIPTIONS, ROLE_LABELS, ROLE_LABELS_PLURAL } from '../../core/labels';
+import { actorLabel, auditLabel, PERMISSION_DESCRIPTIONS, ROLE_LABELS, ROLE_LABELS_PLURAL } from '../../core/labels';
 
 const RECENT_ACTIVITY_COUNT = 5;
 
@@ -25,6 +25,7 @@ export class DashboardPage {
   protected readonly roleLabelsPlural = ROLE_LABELS_PLURAL;
   protected readonly permissionDescriptions = PERMISSION_DESCRIPTIONS;
   protected readonly auditLabel = auditLabel;
+  protected readonly actorLabel = actorLabel;
   protected readonly formatDateTime = formatDateTime;
 
   protected readonly practice = loadForPractice(this.auth, () => this.api.practice());

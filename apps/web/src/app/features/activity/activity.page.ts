@@ -6,7 +6,7 @@ import { errorMessage } from '../../core/api/api-error';
 import { PracticeApi } from '../../core/api/practice-api';
 import { AuthService } from '../../core/auth/auth.service';
 import { formatDateTime } from '../../core/format';
-import { auditLabel } from '../../core/labels';
+import { actorLabel, auditLabel } from '../../core/labels';
 
 const PAGE_SIZE = 25;
 
@@ -22,6 +22,7 @@ export class ActivityPage {
   private readonly api = inject(PracticeApi);
 
   protected readonly auditLabel = auditLabel;
+  protected readonly actorLabel = actorLabel;
   protected readonly formatDateTime = formatDateTime;
 
   protected readonly entries = signal<AuditLogEntry[]>([]);

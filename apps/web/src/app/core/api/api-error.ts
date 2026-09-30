@@ -5,6 +5,21 @@ export function httpStatusOf(error: unknown): number | null {
 }
 
 /**
+ * Every message of a refusal that lists several (for example what still blocks
+ * turning the AI on), or the single safe message otherwise.
+ */
+export function errorMessages(error: unknown, fallback?: string): string[] {
+  if (httpStatusOf(error) !== null) {
+    const body: unknown = (error as HttpErrorResponse).error;
+    const message = typeof body === 'object' && body !== null ? (body as { message?: unknown }).message : undefined;
+    if (Array.isArray(message) && message.length > 0 && message.every((item) => typeof item === 'string')) {
+      return message as string[];
+    }
+  }
+  return [errorMessage(error, fallback)];
+}
+
+/**
  * A message safe to show a person. The API never puts internals in error
  * messages, but anything unexpected still falls back to a generic sentence.
  */

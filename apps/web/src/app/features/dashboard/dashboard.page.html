@@ -101,7 +101,7 @@
                     <li>
                       <span>{{ auditLabel(entry.action) }}</span>
                       <span class="muted">
-                        {{ entry.actorName ?? 'Unknown user' }} · {{ formatDateTime(entry.occurredAt, auth.practice()?.timezone) }}
+                        {{ actorLabel(entry) }} · {{ formatDateTime(entry.occurredAt, auth.practice()?.timezone) }}
                       </span>
                     </li>
                   }

@@ -1,0 +1,83 @@
+.intro {
+  margin: 4px 0 20px;
+}
+
+.card {
+  margin-bottom: 16px;
+}
+
+textarea.input {
+  resize: vertical;
+  font: inherit;
+}
+
+.hint {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+}
+
+.problems {
+  margin: 4px 0 12px;
+  padding-left: 20px;
+}
+
+.day {
+  display: flex;
+  gap: 16px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+
+.day-name {
+  flex: 0 0 96px;
+  padding-top: 6px;
+  font-weight: 600;
+}
+
+.periods {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.period,
+.day-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.time {
+  width: 5.5rem;
+  text-align: center;
+}
+
+.add-number {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.add-number .btn {
+  margin-top: 24px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .day {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .day-name {
+    flex: none;
+    padding-top: 0;
+  }
+}

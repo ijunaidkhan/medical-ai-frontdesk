@@ -1,0 +1,265 @@
+<h1>AI receptionist</h1>
+<p class="muted intro">
+  How the AI receptionist for {{ auth.practice()?.name }} greets callers and what it does in urgent situations.
+  @if (!canEdit()) {
+    You can see these settings but only an owner or administrator can change them.
+  }
+</p>
+
+@if (loadError(); as message) {
+  <p class="alert alert-error" role="alert">{{ message }}</p>
+} @else if (loading()) {
+  <p class="muted" role="status">Loading…</p>
+} @else if (settings(); as current) {
+  @if (draft(); as d) {
+    <section class="card status" aria-labelledby="status-title">
+      <h2 id="status-title">Status</h2>
+      <p role="status">
+        The AI receptionist is
+        <span class="badge" [class.badge-warn]="!current.enabled">{{ current.enabled ? 'On' : 'Off' }}</span>
+      </p>
+      @if (!current.ready) {
+        <p>Before it can be turned on:</p>
+        <ul class="problems">
+          @for (problem of current.problems; track problem) {
+            <li>{{ problem }}</li>
+          }
+        </ul>
+      }
+      @if (switchProblems().length > 0) {
+        <div class="alert alert-error" role="alert">
+          <p>It could not be changed:</p>
+          <ul class="problems">
+            @for (problem of switchProblems(); track problem) {
+              <li>{{ problem }}</li>
+            }
+          </ul>
+        </div>
+      }
+      @if (canEdit()) {
+        <button type="button" class="btn" [class.btn-primary]="!current.enabled" [disabled]="switching() || dirty() || (!current.enabled && !current.ready)" (click)="toggleEnabled()">
+          {{ current.enabled ? 'Turn off' : 'Turn on' }}
+        </button>
+        @if (dirty()) {
+          <p class="muted hint">Save your changes first.</p>
+        }
+      }
+    </section>
+
+    <form (submit)="$event.preventDefault(); save()" novalidate>
+      <section class="card" aria-labelledby="says-title">
+        <h2 id="says-title">What callers hear</h2>
+
+        <div class="field">
+          <label for="greeting">Greeting</label>
+          <textarea id="greeting" class="input" rows="3" [maxLength]="limits.greeting" [disabled]="!canEdit()" [value]="d.greeting" (input)="set('greeting', value($event))" aria-describedby="greeting-help"></textarea>
+          <p id="greeting-help" class="muted hint">
+            Your own welcome. The system always adds this after it, and it cannot be removed: “{{ disclosure }}”
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="emergency">Medical emergency message</label>
+          <textarea id="emergency" class="input" rows="3" [maxLength]="limits.emergency" [disabled]="!canEdit()" [value]="d.emergencyMessage" (input)="set('emergencyMessage', value($event))" aria-describedby="emergency-help"></textarea>
+          <p id="emergency-help" class="muted hint">
+            Said word for word when a caller describes a medical emergency, such as chest pain or trouble breathing. Write it for your country, for example in the US:
+            “If this is a medical emergency, hang up and call 911 now.”
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="crisis">Crisis message (suicide and self-harm)</label>
+          <textarea id="crisis" class="input" rows="3" [maxLength]="limits.crisis" [disabled]="!canEdit()" [value]="d.crisisMessage" (input)="set('crisisMessage', value($event))" aria-describedby="crisis-help"></textarea>
+          <p id="crisis-help" class="muted hint">
+            Said word for word when a caller mentions suicide or hurting themselves. Write it for your country, for example in the US:
+            “If you are thinking about suicide or hurting yourself, call or text 988 now.”
+          </p>
+        </div>
+
+        <p class="muted hint">
+          These messages are not advice from the AI. Have them reviewed by someone medically and legally qualified before real patients call. Callers with an
+          emergency or crisis are always given these messages and the team is alerted; this cannot be switched off.
+        </p>
+      </section>
+
+      <section class="card" aria-labelledby="hours-title">
+        <h2 id="hours-title">Business hours</h2>
+        <p class="muted hint">Times are in your practice’s time zone ({{ auth.practice()?.timezone }}). Use 24-hour times such as 09:00 or 17:30 (24:00 for midnight). A day with no period is closed.</p>
+        @for (day of weekdays; track day) {
+          <div class="day">
+            <span class="day-name">{{ weekdayLabels[day] }}</span>
+            <div class="periods">
+              @for (interval of d.businessHours[day]; track $index; let i = $index) {
+                <div class="period">
+                  <label class="visually-hidden" [for]="day + '-open-' + i">{{ weekdayLabels[day] }} opens</label>
+                  <input [id]="day + '-open-' + i" class="input time" type="text" inputmode="numeric" maxlength="5" placeholder="09:00" autocomplete="off" [disabled]="!canEdit()" [value]="interval.open" (input)="setTime(day, i, 'open', value($event))" />
+                  <span aria-hidden="true">to</span>
+                  <label class="visually-hidden" [for]="day + '-close-' + i">{{ weekdayLabels[day] }} closes</label>
+                  <input [id]="day + '-close-' + i" class="input time" type="text" inputmode="numeric" maxlength="5" placeholder="17:00" autocomplete="off" [disabled]="!canEdit()" [value]="interval.close" (input)="setTime(day, i, 'close', value($event))" />
+                  @if (canEdit()) {
+                    <button type="button" class="btn btn-quiet" (click)="removePeriod(day, i)" [attr.aria-label]="'Remove this period on ' + weekdayLabels[day]">Remove</button>
+                  }
+                </div>
+              } @empty {
+                <span class="muted">Closed</span>
+              }
+              @if (canEdit()) {
+                <div class="day-actions">
+                  @if (d.businessHours[day].length < limits.intervals) {
+                    <button type="button" class="btn btn-quiet" (click)="addPeriod(day)">Add a period</button>
+                  }
+                  <button type="button" class="btn btn-quiet" (click)="openAllDay(day)">Open all day</button>
+                </div>
+              }
+            </div>
+          </div>
+        }
+        @if (hoursProblem(); as problem) {
+          <p class="field-error" role="alert">{{ problem }}</p>
+        }
+      </section>
+
+      <section class="card" aria-labelledby="urgent-title">
+        <h2 id="urgent-title">After hours and urgent calls</h2>
+
+        <div class="field">
+          <label for="after-hours">When the practice is closed</label>
+          <select id="after-hours" class="input" [disabled]="!canEdit()" (change)="chooseAfterHours($event)">
+            @for (action of afterHoursActions; track action) {
+              <option [value]="action" [selected]="action === d.afterHoursAction">{{ afterHoursLabels[action] }}</option>
+            }
+          </select>
+        </div>
+        @if (d.afterHoursAction === 'transfer') {
+          <div class="field">
+            <label for="after-hours-number">Transfer after-hours calls to</label>
+            <select id="after-hours-number" class="input" [disabled]="!canEdit()" (change)="set('afterHoursTransferTargetId', value($event))">
+              <option value="" [selected]="d.afterHoursTransferTargetId === ''">Choose a number…</option>
+              @for (target of activeTargets(); track target.id) {
+                <option [value]="target.id" [selected]="target.id === d.afterHoursTransferTargetId">{{ target.label }} ({{ target.phone }})</option>
+              }
+            </select>
+          </div>
+        }
+
+        <div class="field">
+          <label for="urgent-action">When a call is urgent (but not an emergency)</label>
+          <select id="urgent-action" class="input" [disabled]="!canEdit()" (change)="chooseUrgentAction($event)">
+            @for (action of urgentActions; track action) {
+              <option [value]="action" [selected]="action === d.urgentAction">{{ urgentLabels[action] }}</option>
+            }
+          </select>
+        </div>
+        @if (d.urgentAction !== 'urgent_task') {
+          <div class="field">
+            <label for="urgent-number">Transfer urgent calls to</label>
+            <select id="urgent-number" class="input" [disabled]="!canEdit()" (change)="set('urgentTransferTargetId', value($event))">
+              <option value="" [selected]="d.urgentTransferTargetId === ''">Choose a number…</option>
+              @for (target of activeTargets(); track target.id) {
+                <option [value]="target.id" [selected]="target.id === d.urgentTransferTargetId">{{ target.label }} ({{ target.phone }})</option>
+              }
+            </select>
+          </div>
+        }
+        <p class="muted hint">Emergencies and crisis calls always alert the team, and are handed to this number when one is chosen.</p>
+
+        <div class="field">
+          <label for="phrases">Extra words that make a call urgent (one per line)</label>
+          <textarea id="phrases" class="input" rows="4" [disabled]="!canEdit()" [value]="d.extraUrgentPhrases" (input)="set('extraUrgentPhrases', value($event))" aria-describedby="phrases-help"></textarea>
+          <p id="phrases-help" class="muted hint">
+            For your specialty, for example “manic episode”. These are added to the built-in list and can never replace it. Up to {{ limits.phrases }}.
+          </p>
+          @if (phraseProblem(); as problem) {
+            <p class="field-error">{{ problem }}</p>
+          }
+        </div>
+      </section>
+
+      @if (saveProblems().length > 0) {
+        <div class="alert alert-error" role="alert">
+          <p>The changes were not saved:</p>
+          <ul class="problems">
+            @for (problem of saveProblems(); track problem) {
+              <li>{{ problem }}</li>
+            }
+          </ul>
+        </div>
+      }
+      @if (saved()) {
+        <p class="alert" role="status">Saved.</p>
+      }
+      @if (canEdit()) {
+        <button type="submit" class="btn btn-primary" [disabled]="!canSave()">{{ saving() ? 'Saving…' : 'Save changes' }}</button>
+      }
+    </form>
+
+    <section class="card numbers" aria-labelledby="numbers-title">
+      <h2 id="numbers-title">Transfer numbers</h2>
+      <p class="muted hint">Phone numbers a call can be handed to. A number in use by the settings above cannot be turned off until you choose another.</p>
+      @if (targets().length > 0) {
+        <div class="table-wrap">
+          <table class="table">
+            <caption class="visually-hidden">Transfer numbers</caption>
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Number</th>
+                <th scope="col">Purpose</th>
+                <th scope="col">Status</th>
+                @if (canEdit()) {
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                }
+              </tr>
+            </thead>
+            <tbody>
+              @for (target of targets(); track target.id) {
+                <tr>
+                  <td>{{ target.label }}</td>
+                  <td class="nowrap">{{ target.phone }}</td>
+                  <td>{{ purposeLabels[target.purpose] }}</td>
+                  <td>{{ target.active ? 'In use' : 'Turned off' }}</td>
+                  @if (canEdit()) {
+                    <td>
+                      <button type="button" class="btn btn-quiet" (click)="setTargetActive(target, !target.active)">
+                        {{ target.active ? 'Turn off' : 'Turn on' }}<span class="visually-hidden"> {{ target.label }}</span>
+                      </button>
+                    </td>
+                  }
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <p class="muted">No numbers yet.</p>
+      }
+      @if (targetProblem(); as problem) {
+        <p class="alert alert-error" role="alert">{{ problem }}</p>
+      }
+      @if (canEdit()) {
+        <form class="add-number" (submit)="$event.preventDefault(); addTarget()" novalidate>
+          <div class="field">
+            <label for="new-label">Name</label>
+            <input id="new-label" class="input" maxlength="80" [value]="newTarget().label" (input)="setNewTarget('label', value($event))" placeholder="On-call nurse" />
+          </div>
+          <div class="field">
+            <label for="new-phone">Number</label>
+            <input id="new-phone" class="input" inputmode="tel" [value]="newTarget().phone" (input)="setNewTarget('phone', value($event))" placeholder="+14155550123" aria-describedby="new-phone-help" />
+            <p id="new-phone-help" class="muted hint">With the country code, for example +14155550123.</p>
+          </div>
+          <div class="field">
+            <label for="new-purpose">Purpose</label>
+            <select id="new-purpose" class="input" (change)="setNewTarget('purpose', value($event))">
+              @for (purpose of purposes; track purpose) {
+                <option [value]="purpose" [selected]="purpose === newTarget().purpose">{{ purposeLabels[purpose] }}</option>
+              }
+            </select>
+          </div>
+          <button type="submit" class="btn" [disabled]="addingTarget() || newTarget().label.trim() === '' || newTarget().phone.trim() === ''">
+            {{ addingTarget() ? 'Adding…' : 'Add number' }}
+          </button>
+        </form>
+      }
+    </section>
+  }
+}

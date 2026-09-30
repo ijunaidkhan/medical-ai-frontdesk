@@ -8,6 +8,7 @@ import { ActivityPage } from './activity.page';
 const entry = (id: string, action: string, extra: Partial<AuditLogEntry> = {}): AuditLogEntry => ({
   id,
   action,
+  actorType: 'user',
   actorUserId: 'u1',
   actorName: 'Jane Smith',
   targetType: null,
@@ -59,6 +60,24 @@ describe('ActivityPage', () => {
     expect(second).toContain('(invalid password)');
     expect(second).toContain('Unknown user');
     expect(second).toContain('—');
+  });
+
+  it('names the AI receptionist and the system as such, never as an unknown user', async () => {
+    await setup();
+    firstPage().flush({
+      items: [
+        entry('a1', 'task.created', { actorType: 'ai', actorUserId: null, actorName: null }),
+        entry('a2', 'auth.login.failed', { actorType: 'system', actorUserId: null, actorName: null }),
+        entry('a3', 'auth.login.failed', { actorType: 'user', actorUserId: null, actorName: null }),
+      ],
+      nextCursor: null,
+    } satisfies AuditLogPage);
+    await render(fixture);
+
+    const [ai, system, unknown] = rows();
+    expect(ai).toContain('AI receptionist');
+    expect(system).toContain('System');
+    expect(unknown).toContain('Unknown user');
   });
 
   it('says so when there is nothing to show', async () => {
