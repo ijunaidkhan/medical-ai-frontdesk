@@ -1,5 +1,5 @@
 import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
-import type { Role } from '@frontdesk/shared';
+import type { KnowledgeCategory, KnowledgeStatus, Role, TaskPriority, TaskStatus, TaskType } from '@frontdesk/shared';
 
 // Hand-written to match apps/api/migrations. A migration that changes a table
 // must update its interface here; the integration tests catch drift in the
@@ -67,12 +67,61 @@ export interface AuditLogsTable {
   occurred_at: Generated<Date>;
 }
 
+export interface KnowledgeSourcesTable {
+  id: Generated<string>;
+  practice_id: string;
+  title: string;
+  category: KnowledgeCategory;
+  content: string;
+  status: Generated<KnowledgeStatus>;
+  version: Generated<number>;
+  created_by: string | null;
+  approved_by: string | null;
+  approved_at: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+/** (The generated full-text-search column is only used through raw SQL, so it is not listed.) */
+export interface KnowledgeChunksTable {
+  id: Generated<string>;
+  practice_id: string;
+  source_id: string;
+  ordinal: number;
+  title: string;
+  text: string;
+  created_at: Generated<Date>;
+}
+
+export interface StaffTasksTable {
+  id: Generated<string>;
+  practice_id: string;
+  type: TaskType;
+  status: Generated<TaskStatus>;
+  priority: Generated<TaskPriority>;
+  title: string;
+  details: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  created_by_type: 'user' | 'ai';
+  created_by: string | null;
+  assigned_to: string | null;
+  due_at: Date | null;
+  completed_at: Date | null;
+  completed_by: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface Database {
   practices: PracticesTable;
   users: UsersTable;
   memberships: MembershipsTable;
   refresh_tokens: RefreshTokensTable;
   audit_logs: AuditLogsTable;
+  knowledge_sources: KnowledgeSourcesTable;
+  knowledge_chunks: KnowledgeChunksTable;
+  staff_tasks: StaffTasksTable;
 }
 
 export type Practice = Selectable<PracticesTable>;

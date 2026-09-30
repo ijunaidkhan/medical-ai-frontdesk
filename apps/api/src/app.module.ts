@@ -10,9 +10,11 @@ import { CommonModule } from './common/common.module.js';
 import { validateEnv } from './config/env.validation.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthModule } from './health/health.module.js';
+import { KnowledgeModule } from './knowledge/knowledge.module.js';
 import { LoggingModule } from './logging/logging.module.js';
 import { MembersModule } from './members/members.module.js';
 import { PracticesModule } from './practices/practices.module.js';
+import { TasksModule } from './tasks/tasks.module.js';
 import { PermissionsGuard } from './tenancy/permissions.guard.js';
 import { TenancyModule } from './tenancy/tenancy.module.js';
 
@@ -39,6 +41,8 @@ import { TenancyModule } from './tenancy/tenancy.module.js';
     PracticesModule,
     MembersModule,
     AuditModule,
+    KnowledgeModule,
+    TasksModule,
   ],
   providers: [
     // Guards run in the order they are listed:

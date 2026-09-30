@@ -58,6 +58,10 @@ The API is served under `/api`. Check it: `GET /api/health/live` (process up) an
 | `GET /api/members` | `members:read` (owner, admin, staff) | Members of the caller's practice |
 | `PATCH /api/members/:userId` | `members:manage` (owner, admin) | Change a member's role or status (admins are limited to staff and viewers) |
 | `GET /api/audit-logs` | `audit:read` (owner, admin) | The practice's audit trail, newest first, paged |
+| `GET /api/knowledge`, `/api/knowledge/:id`, `/api/knowledge/search?q=` | `knowledge:read` (owner, admin, staff) | The clinic information the AI receptionist may use; search shows what it would find |
+| `GET /api/tasks`, `/api/tasks/:id` | `tasks:read` (owner, admin, staff) | The queue of callback and message requests (created by staff, and later by the AI receptionist) |
+| `POST /api/tasks`, `PATCH /api/tasks/:id` | `tasks:manage` (owner, admin, staff) | Create, assign, edit and complete tasks (never deleted, only cancelled) |
+| `POST`/`PATCH /api/knowledge`, `POST /api/knowledge/:id/approve`, `/archive`, `/restore` | `knowledge:manage` (owner, admin) | Write, approve and retire that information (only approved text is ever used) |
 | `GET /api/health/live`, `/ready` | public | Liveness / readiness |
 
 Every route needs an access token and an explicit access rule, or it is refused; the practice a request acts in always comes from the verified token. Details, limits and deferred work: [authentication](docs/architecture/authentication.md) and [authorization](docs/architecture/authorization.md).

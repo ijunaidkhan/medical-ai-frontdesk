@@ -84,6 +84,7 @@ export function as(app: TestApp, accessToken: string) {
   return {
     get: (path: string) => authed(request(app.getHttpServer()).get(path)),
     patch: (path: string, body?: object) => authed(request(app.getHttpServer()).patch(path)).send(body),
+    post: (path: string, body?: object) => authed(request(app.getHttpServer()).post(path)).send(body),
   };
 }
 

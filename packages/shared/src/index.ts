@@ -5,3 +5,5 @@ export * from './auth.js';
 export * from './practice.js';
 export * from './members.js';
 export * from './audit.js';
+export * from './knowledge.js';
+export * from './tasks.js';

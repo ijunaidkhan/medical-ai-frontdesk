@@ -16,11 +16,21 @@ describe('role permissions', () => {
   it.each<[Role, Permission[], Permission[]]>([
     ['owner', [...PERMISSIONS], []],
     ['admin', [...PERMISSIONS], []],
-    ['staff', ['practice:read', 'members:read'], ['practice:manage', 'members:manage', 'audit:read']],
-    ['viewer', ['practice:read'], ['practice:manage', 'members:read', 'members:manage', 'audit:read']],
+    [
+      'staff',
+      ['practice:read', 'members:read', 'knowledge:read', 'tasks:read', 'tasks:manage'],
+      ['practice:manage', 'members:manage', 'audit:read', 'knowledge:manage'],
+    ],
+    [
+      'viewer',
+      ['practice:read'],
+      ['practice:manage', 'members:read', 'members:manage', 'audit:read', 'knowledge:read', 'knowledge:manage', 'tasks:read', 'tasks:manage'],
+    ],
   ])('%s has exactly the intended permissions', (role, allowed, denied) => {
     for (const permission of allowed) expect(hasPermission(role, permission)).toBe(true);
     for (const permission of denied) expect(hasPermission(role, permission)).toBe(false);
+    // "Exactly": nothing beyond the allowed list, and every permission is decided one way or the other.
+    expect([...allowed, ...denied].sort()).toEqual([...PERMISSIONS].sort());
   });
 
   it('never gives a lower role something a higher role lacks', () => {
@@ -32,9 +42,13 @@ describe('role permissions', () => {
     }
   });
 
-  it('keeps every write and audit permission away from staff and viewers', () => {
-    for (const role of ['staff', 'viewer'] as const) {
-      expect(ROLE_PERMISSIONS[role].filter((p) => p.endsWith(':manage') || p.startsWith('audit:'))).toEqual([]);
-    }
+  it('keeps every write and audit permission away from viewers', () => {
+    expect(ROLE_PERMISSIONS.viewer.filter((p) => p.endsWith(':manage') || p.startsWith('audit:'))).toEqual([]);
+  });
+
+  it('keeps every write and audit permission away from staff EXCEPT working the task queue', () => {
+    // Staff answer the phones and work callbacks, so tasks:manage is deliberate; nothing else is.
+    const writes = ROLE_PERMISSIONS.staff.filter((p) => p.endsWith(':manage') || p.startsWith('audit:'));
+    expect(writes).toEqual(['tasks:manage']);
   });
 });

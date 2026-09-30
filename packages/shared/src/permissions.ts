@@ -10,6 +10,10 @@ export const PERMISSIONS = [
   'members:read',
   'members:manage',
   'audit:read',
+  'knowledge:read',
+  'knowledge:manage',
+  'tasks:read',
+  'tasks:manage',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -18,11 +22,14 @@ export type Permission = (typeof PERMISSIONS)[number];
  * Typed as a full Record so adding a role without deciding its permissions
  * is a compile error. Finer limits (for example, admins cannot change owners)
  * are business rules in the API, not extra permissions.
+ *
+ * Staff work the task queue (callback and message requests), so they hold
+ * tasks:manage; the other ":manage" permissions stay with owners and admins.
  */
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   owner: PERMISSIONS,
   admin: PERMISSIONS,
-  staff: ['practice:read', 'members:read'],
+  staff: ['practice:read', 'members:read', 'knowledge:read', 'tasks:read', 'tasks:manage'],
   viewer: ['practice:read'],
 };
 

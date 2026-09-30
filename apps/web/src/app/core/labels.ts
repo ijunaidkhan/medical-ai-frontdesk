@@ -21,6 +21,10 @@ export const PERMISSION_DESCRIPTIONS: Readonly<Record<Permission, string>> = {
   'members:read': 'See who is on the team',
   'members:manage': 'Manage team roles and access',
   'audit:read': 'Review the activity log',
+  'knowledge:read': 'See the clinic information the AI receptionist uses',
+  'knowledge:manage': 'Write and approve the clinic information the AI receptionist uses',
+  'tasks:read': 'See the task queue (callbacks and messages)',
+  'tasks:manage': 'Create, assign and complete tasks',
 };
 
 const AUDIT_LABELS: Readonly<Record<string, string>> = {
@@ -36,6 +40,15 @@ const AUDIT_LABELS: Readonly<Record<string, string>> = {
   'member.suspended': 'Team member suspended',
   'member.reactivated': 'Team member reactivated',
   'bootstrap.practice_created': 'Practice created',
+  'knowledge.created': 'Knowledge entry added',
+  'knowledge.updated': 'Knowledge entry edited',
+  'knowledge.approved': 'Knowledge entry approved',
+  'knowledge.archived': 'Knowledge entry archived',
+  'knowledge.restored': 'Knowledge entry restored',
+  'task.created': 'Task created',
+  'task.updated': 'Task edited',
+  'task.assigned': 'Task assigned',
+  'task.status_changed': 'Task status changed',
 };
 
 /** A readable name for an audit event, falling back to the raw event name. */

@@ -11,6 +11,12 @@ Status: implemented (milestone 1, step 5). Code: `apps/api/src/tenancy`, `member
 | `members:read` | yes | yes | yes | |
 | `members:manage` | yes | yes | | |
 | `audit:read` | yes | yes | | |
+| `knowledge:read` (see the clinic information the AI uses) | yes | yes | yes | |
+| `knowledge:manage` (write, approve, archive it) | yes | yes | | |
+| `tasks:read` (see the callback and message queue) | yes | yes | yes | |
+| `tasks:manage` (create, assign, complete tasks) | yes | yes | yes | |
+
+Staff hold `tasks:manage` on purpose: they answer the phones and work the callback queue. It is the only write permission staff have.
 
 The API enforces this. The web app imports the same table only to hide controls that would be refused anyway. Adding a role without deciding its permissions is a compile error.
 
@@ -55,6 +61,10 @@ The API's database role can update only `practices(name, timezone, phone)` and `
 | `GET /api/members` | `members:read` | Members of the caller's practice (capped at 500) |
 | `PATCH /api/members/:userId` | `members:manage` | Role and/or status; audited (`member.role_changed`, `member.suspended`, `member.reactivated`) |
 | `GET /api/audit-logs?limit&cursor` | `audit:read` | Newest first; default 50, max 200; stable cursor paging |
+| `GET /api/knowledge`, `GET /api/knowledge/:id`, `GET /api/knowledge/search?q=` | `knowledge:read` | The AI receptionist's knowledge base (see [ai-receptionist.md](ai-receptionist.md)); search shows what the AI would find |
+| `GET /api/tasks?status&assignee&limit&cursor`, `GET /api/tasks/:id` | `tasks:read` | The task queue: default is open and in-progress, newest first; filter by status and by assignee (`me`, `unassigned`, or a person); cursor paging |
+| `POST /api/tasks`, `PATCH /api/tasks/:id` | `tasks:manage` | Create and edit tasks, assign to an active member of the practice, change status (a finished task can only be reopened, and must be reopened before it is edited); never deleted, only cancelled; audited without the contact details |
+| `POST /api/knowledge`, `PATCH /api/knowledge/:id`, `POST /api/knowledge/:id/{approve,archive,restore}` | `knowledge:manage` | New entries are drafts; only an approved entry can be used, and editing approved wording withdraws the approval; audited |
 | `GET /api/auth/me`, `POST /api/auth/switch-practice` | any active member | |
 
 ## Known limits and deferred work
