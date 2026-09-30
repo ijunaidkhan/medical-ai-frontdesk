@@ -73,6 +73,8 @@ The API's database role can update only `practices(name, timezone, phone)` and `
 | `POST /api/knowledge`, `PATCH /api/knowledge/:id`, `POST /api/knowledge/:id/{approve,archive,restore}` | `knowledge:manage` | New entries are drafts; only an approved entry can be used, and editing approved wording withdraws the approval; audited |
 | `POST /api/agent/test-conversations`, `POST /api/agent/test-conversations/:id/messages` | `ai:configure` | A text test chat with the practice's own receptionist (see [ai-receptionist.md](ai-receptionist.md)); 409 until a greeting and an emergency message exist, 503 until a language model is configured; 30 requests a minute per IP |
 | `GET /api/conversations?limit&cursor`, `GET /api/conversations/:id` | `calls:read` | Conversation list (newest first, cursor paging) and full transcript with every tool call; viewing a transcript is audited (`conversation.viewed`) |
+| `GET /api/ai/phone-numbers` | `ai:read` | The phone numbers connected to the practice (read-only; the operator connects them with `npm run phone`). See [telephony-voice.md](telephony-voice.md) |
+| `/api/voice/*` (added in the next steps) | none: public, but every request must carry a valid Twilio signature (403 otherwise; 404 while voice is off) | Incoming calls from Twilio. Not reachable with a user login and never acts for a signed-in user |
 | `GET /api/auth/me`, `POST /api/auth/switch-practice` | any active member | |
 
 ## Known limits and deferred work

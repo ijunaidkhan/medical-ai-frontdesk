@@ -84,6 +84,7 @@ Every route needs an access token and an explicit access rule, or it is refused;
 | `npm run db:migrate:down` | Revert the latest migration |
 | `npm run db:migrate:status` | List applied and pending migrations |
 | `npm run bootstrap` | Create the first practice and owner account |
+| `npm run phone -- add --practice alpha --number +14155550123` | Connect a phone number to a practice (also `list`, `enable`, `disable`); operator only |
 
 ## Common commands
 
