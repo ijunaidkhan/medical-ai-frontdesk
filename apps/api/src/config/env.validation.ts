@@ -1,7 +1,8 @@
 import { plainToInstance, Transform } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, IsUrl, Max, MaxLength, Min, MinLength, validateSync } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min, MinLength, validateSync, ValidateIf } from 'class-validator';
 
 export const NODE_ENVS = ['development', 'test', 'production'] as const;
+export const LLM_PROVIDERS = ['none', 'anthropic'] as const;
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
 
 /**
@@ -56,6 +57,31 @@ export class EnvironmentVariables {
   @Min(0)
   @Max(5)
   TRUST_PROXY_HOPS: number = 0;
+
+  /**
+   * Which language model answers callers. "none" (the default) means no model:
+   * test chats cannot start, but the fixed emergency scripts still work.
+   */
+  @Transform(({ value }) => (value === undefined || value === '' ? 'none' : value))
+  @IsIn(LLM_PROVIDERS)
+  LLM_PROVIDER: (typeof LLM_PROVIDERS)[number] = 'none';
+
+  /**
+   * Anthropic API key. Required only when LLM_PROVIDER=anthropic. A secret: it is
+   * read from the environment only, never logged, never returned by the API, never committed.
+   */
+  @Transform(({ value }) => (value === '' ? undefined : value))
+  @ValidateIf((config: EnvironmentVariables) => config.LLM_PROVIDER === 'anthropic')
+  @IsString()
+  @MinLength(20, { message: 'ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic' })
+  @MaxLength(512)
+  ANTHROPIC_API_KEY?: string;
+
+  /** The Anthropic model id, e.g. claude-sonnet-5-5 (more capable) or claude-haiku-4-5-20251001 (faster, cheaper). */
+  @Transform(({ value }) => (value === undefined || value === '' ? 'claude-sonnet-5-5' : value))
+  @IsString()
+  @Matches(/^[A-Za-z0-9._-]{1,100}$/, { message: 'ANTHROPIC_MODEL must be a model id such as claude-sonnet-5-5' })
+  ANTHROPIC_MODEL: string = 'claude-sonnet-5-5';
 
   @IsOptional()
   @Transform(({ value }) =>

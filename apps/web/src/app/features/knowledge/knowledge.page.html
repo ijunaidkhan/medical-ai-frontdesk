@@ -1,0 +1,183 @@
+<h1>Knowledge</h1>
+<p class="muted intro">
+  The information the AI receptionist may use to answer callers in {{ auth.practice()?.name }}. It only uses entries that a person has
+  <strong>approved</strong>; it never guesses, and if it cannot find an answer it offers to take a message.
+  @if (!canManage()) {
+    You can read the entries but only an owner or administrator can change them.
+  }
+</p>
+
+@if (loadError(); as message) {
+  <p class="alert alert-error" role="alert">{{ message }}</p>
+} @else if (loading()) {
+  <p class="muted" role="status">Loading…</p>
+} @else {
+  <div class="layout">
+    <section class="card list" aria-labelledby="entries-title">
+      <div class="list-head">
+        <h2 id="entries-title">{{ showArchived() ? 'Archived entries' : 'Entries' }}</h2>
+        @if (canManage()) {
+          <button type="button" class="btn btn-primary" (click)="newEntry()">New entry</button>
+        }
+      </div>
+
+      @if (archivedCount() > 0 || showArchived()) {
+        <button type="button" class="btn btn-quiet" (click)="showArchived.set(!showArchived())">
+          {{ showArchived() ? 'Show current entries' : 'Show archived (' + archivedCount() + ')' }}
+        </button>
+      }
+
+      @if (visible().length > 0) {
+        <div class="table-wrap">
+          <table class="table">
+            <caption class="visually-hidden">Knowledge entries</caption>
+            <thead>
+              <tr>
+                <th scope="col">Title</th>
+                <th scope="col">Status</th>
+                <th scope="col">Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (source of visible(); track source.id) {
+                <tr [class.current]="selected()?.id === source.id">
+                  <td>
+                    <button type="button" class="link-button" [attr.aria-current]="selected()?.id === source.id ? 'true' : null" (click)="open(source.id)">{{ source.title }}</button>
+                    <span class="muted excerpt">{{ categoryLabels[source.category] }} · {{ source.excerpt }}</span>
+                  </td>
+                  <td>
+                    <span class="badge" [class.badge-warn]="source.status === 'draft'">{{ statusLabels[source.status] }}</span>
+                  </td>
+                  <td class="nowrap">{{ formatDateTime(source.updatedAt, auth.practice()?.timezone) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <p class="muted">
+          {{ showArchived() ? 'Nothing is archived.' : canManage() ? 'Nothing here yet. Add the first entry, such as your opening hours.' : 'Nothing has been added yet.' }}
+        </p>
+      }
+    </section>
+
+    <section class="card editor" aria-labelledby="editor-title">
+      @if (draft(); as d) {
+        <h2 id="editor-title">{{ isNew() ? 'New entry' : readOnly() && !canManage() ? 'Entry' : 'Edit entry' }}</h2>
+
+        @if (selected(); as current) {
+          <p class="status-line">
+            <span class="badge" [class.badge-warn]="current.status === 'draft'">{{ statusLabels[current.status] }}</span>
+            @if (current.status === 'approved' && current.approvedByName && current.approvedAt) {
+              <span class="muted">Approved by {{ current.approvedByName }} on {{ formatDateTime(current.approvedAt, auth.practice()?.timezone) }}</span>
+            }
+            <span class="muted">Version {{ current.version }}</span>
+          </p>
+          @if (current.status === 'archived') {
+            <p class="muted">This entry is archived and not used. Restore it to edit it.</p>
+          }
+        }
+
+        <form (submit)="$event.preventDefault(); save()" novalidate>
+          <div class="field">
+            <label for="title">Title</label>
+            <input id="title" class="input" [maxLength]="limits.title" [disabled]="readOnly()" [value]="d.title" (input)="setField('title', value($event))" />
+          </div>
+
+          <div class="field">
+            <label for="category">Category</label>
+            <select id="category" class="input" [disabled]="readOnly()" (change)="chooseCategory($event)">
+              @for (category of categories; track category) {
+                <option [value]="category" [selected]="category === d.category">{{ categoryLabels[category] }}</option>
+              }
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="content">What the AI receptionist may say</label>
+            <textarea id="content" class="input" rows="10" [maxLength]="limits.content" [disabled]="readOnly()" [value]="d.content" (input)="setField('content', value($event))" aria-describedby="content-help"></textarea>
+            <p id="content-help" class="muted hint">
+              Write plain facts, one topic per entry, for example “We are open Monday to Friday, 9am to 5pm.” Do not put medical advice here.
+              {{ d.content.length }} / {{ limits.content }}
+            </p>
+          </div>
+
+          @if (wordingChanged()) {
+            <p class="alert" role="status">This entry is approved. Changing its wording sends it back to draft, and it must be approved again before the AI can use it.</p>
+          }
+          @if (problem(); as message) {
+            <p class="alert alert-error" role="alert">{{ message }}</p>
+          }
+          @if (notice(); as message) {
+            <p class="alert" role="status">{{ message }}</p>
+          }
+
+          <div class="actions">
+            @if (!readOnly()) {
+              <button type="submit" class="btn btn-primary" [disabled]="!canSave()">{{ working() ? 'Working…' : isNew() ? 'Save as draft' : 'Save changes' }}</button>
+            }
+            @if (dirty()) {
+              <button type="button" class="btn" (click)="discard()">Discard changes</button>
+            }
+            @if (canManage() && selected(); as current) {
+              @if (current.status === 'draft') {
+                <button type="button" class="btn" [disabled]="dirty() || working()" (click)="approve()">Approve</button>
+              }
+              @if (current.status === 'archived') {
+                <button type="button" class="btn" [disabled]="working()" (click)="restore()">Restore</button>
+              } @else {
+                <button type="button" class="btn" [disabled]="dirty() || working()" (click)="archive()">Archive</button>
+              }
+            }
+            <button type="button" class="btn btn-quiet" (click)="close()">Close</button>
+          </div>
+          @if (dirty() && selected()) {
+            <p class="muted hint">Save or discard your changes before approving or archiving.</p>
+          }
+        </form>
+      } @else {
+        <h2 id="editor-title">Entry</h2>
+        @if (opening()) {
+          <p class="muted" role="status">Loading…</p>
+        } @else {
+          <p class="muted">Choose an entry to read it{{ canManage() ? ', or add a new one' : '' }}.</p>
+        }
+        @if (problem(); as message) {
+          <p class="alert alert-error" role="alert">{{ message }}</p>
+        }
+        @if (notice(); as message) {
+          <p class="alert" role="status">{{ message }}</p>
+        }
+      }
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="search-title">
+    <h2 id="search-title">What would the AI find?</h2>
+    <p class="muted hint">Type a question a caller might ask. This shows the approved information the AI receptionist would be given for it (drafts and archived entries are never used).</p>
+    <form class="search" (submit)="$event.preventDefault(); search()" novalidate>
+      <div class="field">
+        <label for="question">Question</label>
+        <input id="question" class="input" [maxLength]="limits.search" [value]="query()" (input)="query.set(value($event))" placeholder="Do you take Blue Cross?" />
+      </div>
+      <button type="submit" class="btn" [disabled]="searching() || query().trim() === ''">{{ searching() ? 'Searching…' : 'Search' }}</button>
+    </form>
+    @if (searchProblem(); as message) {
+      <p class="alert alert-error" role="alert">{{ message }}</p>
+    }
+    @if (results(); as found) {
+      @if (found.length === 0) {
+        <p role="status">Nothing approved matches. The AI receptionist would say it does not have that information and offer to take a message.</p>
+      } @else {
+        <ol class="results" aria-label="Search results">
+          @for (result of found; track result.chunkId) {
+            <li>
+              <strong>{{ result.title }}</strong>
+              <span class="result-text">{{ result.text }}</span>
+            </li>
+          }
+        </ol>
+      }
+    }
+  </section>
+}

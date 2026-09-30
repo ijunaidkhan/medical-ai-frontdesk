@@ -1,0 +1,89 @@
+<h1>Test chat</h1>
+<p class="muted intro">
+  Try the AI receptionist for {{ auth.practice()?.name }} by typing as a caller would. This is the real receptionist, with the same rules and safety checks.
+</p>
+<p class="alert" role="note">
+  <strong>This is a test, but what the AI does is real.</strong> If it saves a message for the team, or an emergency phrase raises an alert, a real task appears in
+  your task queue. Nothing is sent to a patient.
+</p>
+
+@if (problems().length > 0) {
+  <div class="alert alert-error" role="alert">
+    @if (problems().length > 1) {
+      <p>The test chat cannot be used yet:</p>
+      <ul class="problems">
+        @for (problem of problems(); track problem) {
+          <li>{{ problem }}</li>
+        }
+      </ul>
+    } @else {
+      <p>{{ problems()[0] }}</p>
+    }
+    @if (setupProblem()) {
+      <p><a routerLink="/ai">Open the AI receptionist settings</a> to finish setting it up.</p>
+    }
+  </div>
+}
+
+@if (conversationId() === null) {
+  <section class="card" aria-labelledby="start-title">
+    <h2 id="start-title">Start a chat</h2>
+    <p class="muted">The receptionist opens with your greeting, and then you reply as the caller.</p>
+    <button type="button" class="btn btn-primary" [disabled]="starting()" (click)="start()">{{ starting() ? 'Starting…' : 'Start a test chat' }}</button>
+  </section>
+} @else {
+  <section class="card chat" aria-labelledby="chat-title">
+    <div class="chat-head">
+      <h2 id="chat-title">Conversation</h2>
+      <button type="button" class="btn btn-quiet" [disabled]="starting()" (click)="start()">Start over</button>
+    </div>
+
+    @if (escalated(); as level) {
+      <p class="alert" role="status">
+        The safety rules were triggered in this chat ({{ level === 'emergency' ? 'emergency or crisis' : 'urgent request' }}). A task was created for staff.
+      </p>
+    }
+
+    <ol class="log" aria-label="Conversation so far" aria-live="polite">
+      @for (line of lines(); track $index) {
+        <li class="line" [class.caller]="line.who === 'caller'" [class.ai]="line.who === 'ai'">
+          <span class="who">{{ line.who === 'caller' ? 'You (as the caller)' : 'AI receptionist' }}</span>
+          <span class="said">{{ line.text }}</span>
+          @if (line.note; as note) {
+            <span class="note muted">{{ note }}</span>
+          }
+        </li>
+      }
+      @if (sending()) {
+        <li class="line ai" role="status"><span class="muted">The receptionist is replying…</span></li>
+      }
+    </ol>
+
+    @if (tasksCreated() > 0) {
+      <p class="muted">
+        {{ tasksCreated() === 1 ? 'The AI receptionist created 1 task for staff in this chat.' : 'The AI receptionist created ' + tasksCreated() + ' tasks for staff in this chat.' }}
+      </p>
+    }
+
+    @if (ended()) {
+      <p class="alert" role="status">{{ endedText() }} Start over to try another.</p>
+    } @else {
+      <form class="compose" (submit)="$event.preventDefault(); send()" novalidate>
+        <label for="message" class="visually-hidden">Your message as the caller</label>
+        <textarea
+          id="message"
+          class="input"
+          rows="2"
+          [maxLength]="maxLength"
+          [value]="text()"
+          [disabled]="sending()"
+          placeholder="Type what the caller says…"
+          (input)="text.set(value($event))"
+          (keydown)="onKey($event)"
+        ></textarea>
+        <button type="submit" class="btn btn-primary" [disabled]="!canSend()">{{ sending() ? 'Sending…' : 'Send' }}</button>
+      </form>
+      <p class="muted hint">Enter sends, Shift+Enter adds a new line.</p>
+    }
+  </section>
+}

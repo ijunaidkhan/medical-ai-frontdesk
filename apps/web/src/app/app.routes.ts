@@ -26,10 +26,22 @@ export const routes: Routes = [
         loadComponent: () => import('./features/team/team.page').then((m) => m.TeamPage),
       },
       {
+        path: 'knowledge',
+        title: 'Knowledge · AI Front Desk',
+        canActivate: [permissionGuard('knowledge:read')],
+        loadComponent: () => import('./features/knowledge/knowledge.page').then((m) => m.KnowledgePage),
+      },
+      {
         path: 'ai',
         title: 'AI receptionist · AI Front Desk',
         canActivate: [permissionGuard('ai:read')],
         loadComponent: () => import('./features/ai-settings/ai-settings.page').then((m) => m.AiSettingsPage),
+      },
+      {
+        path: 'test-chat',
+        title: 'Test chat · AI Front Desk',
+        canActivate: [permissionGuard('ai:configure')],
+        loadComponent: () => import('./features/test-chat/test-chat.page').then((m) => m.TestChatPage),
       },
       {
         path: 'activity',

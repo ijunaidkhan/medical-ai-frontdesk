@@ -49,10 +49,30 @@ export interface LanguageModel {
 /** Injection token: the module decides which model is behind it. */
 export const LANGUAGE_MODEL = Symbol('LANGUAGE_MODEL');
 
+/**
+ * The model could not be reached or is overloaded (network failure, timeout,
+ * rate limit, server error). Worth trying again later. The message is written
+ * to be safe to log: a status number at most, never anything the vendor sent back.
+ */
 export class ModelUnavailableError extends Error {
   constructor(message = 'The language model is not available') {
     super(message);
     this.name = 'ModelUnavailableError';
+  }
+}
+
+/**
+ * The model's API refused the request (for example a wrong key or a bad request).
+ * Retrying will not help; an operator has to fix the configuration. Safe-to-log
+ * message, as above.
+ */
+export class ModelRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ModelRequestError';
   }
 }
 

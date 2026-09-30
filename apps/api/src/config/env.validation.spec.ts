@@ -69,6 +69,55 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('the language model', () => {
+    const KEY = 'sk-test-0123456789-abcdefghijklmnopqrstuvwxyz';
+
+    it('is off by default: no provider, the default model name, no key needed', () => {
+      const env = validateEnv(REQUIRED);
+      expect(env.LLM_PROVIDER).toBe('none');
+      expect(env.ANTHROPIC_MODEL).toBe('claude-sonnet-5-5');
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    });
+
+    it('treats blank values (an unedited .env) as not set', () => {
+      const env = validateEnv({ ...REQUIRED, LLM_PROVIDER: '', ANTHROPIC_API_KEY: '', ANTHROPIC_MODEL: '' });
+      expect(env).toMatchObject({ LLM_PROVIDER: 'none', ANTHROPIC_MODEL: 'claude-sonnet-5-5' });
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    });
+
+    it('accepts the Anthropic provider with a key and a chosen model', () => {
+      const env = validateEnv({ ...REQUIRED, LLM_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: KEY, ANTHROPIC_MODEL: 'claude-haiku-4-5-20251001' });
+      expect(env).toMatchObject({ LLM_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: KEY, ANTHROPIC_MODEL: 'claude-haiku-4-5-20251001' });
+    });
+
+    it.each([
+      ['no key', {}],
+      ['a blank key', { ANTHROPIC_API_KEY: '' }],
+      ['a key that is obviously too short', { ANTHROPIC_API_KEY: 'abc' }],
+    ])('refuses the Anthropic provider with %s', (_name, extra) => {
+      expect(() => validateEnv({ ...REQUIRED, LLM_PROVIDER: 'anthropic', ...extra })).toThrow(/ANTHROPIC_API_KEY/);
+    });
+
+    it('does not insist on a key when no provider is chosen', () => {
+      expect(() => validateEnv({ ...REQUIRED, LLM_PROVIDER: 'none' })).not.toThrow();
+    });
+
+    it('refuses an unknown provider and a model id with odd characters', () => {
+      expect(() => validateEnv({ ...REQUIRED, LLM_PROVIDER: 'openai' })).toThrow(/LLM_PROVIDER/);
+      expect(() => validateEnv({ ...REQUIRED, ANTHROPIC_MODEL: 'claude sonnet; drop table' })).toThrow(/ANTHROPIC_MODEL/);
+    });
+
+    it('never echoes the key in an error message', () => {
+      try {
+        validateEnv({ ...REQUIRED, LLM_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: KEY, ANTHROPIC_MODEL: 'bad model!' });
+        throw new Error('should have been refused');
+      } catch (error) {
+        expect((error as Error).message).toMatch(/ANTHROPIC_MODEL/);
+        expect((error as Error).message).not.toContain(KEY);
+      }
+    });
+  });
+
   it('rejects an out-of-range port', () => {
     expect(() => validateEnv({ ...REQUIRED, PORT: '70000' })).toThrow(/PORT/);
   });

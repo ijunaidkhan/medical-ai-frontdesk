@@ -1,0 +1,109 @@
+.intro {
+  margin: 4px 0 20px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.card {
+  margin-bottom: 0;
+}
+
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.list-head h2 {
+  margin: 0;
+}
+
+.link-button {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.excerpt {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.875rem;
+}
+
+.current {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+textarea.input {
+  resize: vertical;
+  font: inherit;
+}
+
+.hint {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.search .field {
+  flex: 1 1 280px;
+  margin: 0;
+}
+
+.results {
+  margin: 16px 0 0;
+  padding-left: 20px;
+}
+
+.results li {
+  margin-bottom: 12px;
+}
+
+.result-text {
+  display: block;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 800px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

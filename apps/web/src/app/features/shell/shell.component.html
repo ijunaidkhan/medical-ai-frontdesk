@@ -41,8 +41,14 @@
   @if (auth.can('members:read')) {
     <a routerLink="/team" routerLinkActive="active">Team</a>
   }
+  @if (auth.can('knowledge:read')) {
+    <a routerLink="/knowledge" routerLinkActive="active">Knowledge</a>
+  }
   @if (auth.can('ai:read')) {
     <a routerLink="/ai" routerLinkActive="active">AI receptionist</a>
+  }
+  @if (auth.can('ai:configure')) {
+    <a routerLink="/test-chat" routerLinkActive="active">Test chat</a>
   }
   @if (auth.can('audit:read')) {
     <a routerLink="/activity" routerLinkActive="active">Activity</a>

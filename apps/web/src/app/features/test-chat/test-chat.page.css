@@ -1,0 +1,77 @@
+.intro {
+  margin: 4px 0 12px;
+}
+
+.problems {
+  margin: 4px 0 12px;
+  padding-left: 20px;
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-head h2 {
+  margin: 0;
+}
+
+.log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 55vh;
+  margin: 12px 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.line.caller {
+  align-self: flex-end;
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.who {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.said {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin-top: 4px;
+  font-size: 0.8125rem;
+}
+
+.compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.compose textarea {
+  flex: 1;
+  resize: vertical;
+  font: inherit;
+}
+
+.hint {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+}

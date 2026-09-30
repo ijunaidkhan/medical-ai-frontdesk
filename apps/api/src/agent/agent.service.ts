@@ -22,7 +22,7 @@ import { withPracticeContext } from '../database/practice-context.js';
 import { AiService } from '../ai/ai.service.js';
 import type { CreateTaskDto } from '../tasks/tasks.dto.js';
 import { TasksService } from '../tasks/tasks.service.js';
-import { LANGUAGE_MODEL, ModelUnavailableError, type LanguageModel, type ModelMessage, type ModelRequest, type ModelResponse } from './model/language-model.js';
+import { LANGUAGE_MODEL, ModelRequestError, ModelUnavailableError, type LanguageModel, type ModelMessage, type ModelRequest, type ModelResponse } from './model/language-model.js';
 import { buildSystemPrompt, type AgentMode } from './prompt.js';
 import { jsonSafe, stripControl } from './sanitize.js';
 import { classifyUrgency } from './safety/classifier.js';
@@ -311,7 +311,12 @@ export class AgentService {
       }
     } catch (error) {
       failure = error instanceof ModelUnavailableError ? 'model_unavailable' : 'model_error';
-      this.logger.warn({ conversationId, practiceId: auth.practiceId, error: error instanceof Error ? error.name : 'unknown' }, 'The language model failed; using the safe reply');
+      // Only our own error types carry a message written to be safe to log (a status number, never vendor text).
+      const safeDetail = error instanceof ModelUnavailableError || error instanceof ModelRequestError ? error.message : undefined;
+      this.logger.warn(
+        { conversationId, practiceId: auth.practiceId, error: error instanceof Error ? error.name : 'unknown', detail: safeDetail },
+        'The language model failed; using the safe reply',
+      );
     }
 
     // Every reply is checked on its way out. A failed or unsafe one is replaced by a fixed line.

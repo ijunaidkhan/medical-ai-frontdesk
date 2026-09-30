@@ -1,4 +1,30 @@
-import type { AfterHoursAction, AuditLogEntry, Permission, Role, TransferPurpose, UrgentAction, Weekday } from '@frontdesk/shared';
+import type {
+  AfterHoursAction,
+  AuditLogEntry,
+  KnowledgeCategory,
+  KnowledgeStatus,
+  Permission,
+  Role,
+  TransferPurpose,
+  UrgentAction,
+  Weekday,
+} from '@frontdesk/shared';
+
+export const KNOWLEDGE_CATEGORY_LABELS: Readonly<Record<KnowledgeCategory, string>> = {
+  general: 'General',
+  hours_location: 'Hours and location',
+  services: 'Services',
+  insurance_billing: 'Insurance and billing',
+  policies: 'Policies',
+  faq: 'Frequently asked questions',
+};
+
+/** "Draft" is written for staff: the AI cannot use it until a person approves it. */
+export const KNOWLEDGE_STATUS_LABELS: Readonly<Record<KnowledgeStatus, string>> = {
+  draft: 'Draft (not used yet)',
+  approved: 'Approved',
+  archived: 'Archived',
+};
 
 export const WEEKDAY_LABELS: Readonly<Record<Weekday, string>> = {
   mon: 'Monday',
