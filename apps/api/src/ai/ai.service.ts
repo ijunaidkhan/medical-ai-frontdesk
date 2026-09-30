@@ -26,6 +26,7 @@ const DEFAULT_STATE: State = {
   afterHoursAction: 'take_message',
   afterHoursTransferTargetId: null,
   emergencyMessage: '',
+  crisisMessage: '',
   urgentAction: 'urgent_task',
   urgentTransferTargetId: null,
   extraUrgentPhrases: [],
@@ -70,6 +71,7 @@ export class AiService {
       if (dto.afterHoursAction !== undefined) next.afterHoursAction = dto.afterHoursAction;
       if (dto.afterHoursTransferTargetId !== undefined) next.afterHoursTransferTargetId = dto.afterHoursTransferTargetId;
       if (dto.emergencyMessage !== undefined) next.emergencyMessage = dto.emergencyMessage;
+      if (dto.crisisMessage !== undefined) next.crisisMessage = dto.crisisMessage;
       if (dto.urgentAction !== undefined) next.urgentAction = dto.urgentAction;
       if (dto.urgentTransferTargetId !== undefined) next.urgentTransferTargetId = dto.urgentTransferTargetId;
       if (dto.extraUrgentPhrases !== undefined) next.extraUrgentPhrases = uniquePhrases(dto.extraUrgentPhrases);
@@ -101,6 +103,7 @@ export class AiService {
         after_hours_action: next.afterHoursAction,
         after_hours_transfer_target_id: next.afterHoursTransferTargetId,
         emergency_message: next.emergencyMessage,
+        crisis_message: next.crisisMessage,
         urgent_action: next.urgentAction,
         urgent_transfer_target_id: next.urgentTransferTargetId,
         extra_urgent_phrases: next.extraUrgentPhrases,
@@ -131,6 +134,16 @@ export class AiService {
       const saved = await this.loadRow(trx, auth.practiceId);
       return this.describe(saved?.state ?? next, saved?.updatedAt ?? null, targets);
     });
+  }
+
+  /**
+   * The settings as the agent reads them, inside a practice-scoped transaction
+   * the caller already holds. A practice that never saved settings gets the
+   * all-off defaults, so the agent sees "nothing written" rather than an error.
+   */
+  async loadForAgent(trx: Transaction<Database>, practiceId: string): Promise<{ settings: State; targets: TransferTarget[] }> {
+    const [row, targets] = await Promise.all([this.loadRow(trx, practiceId), this.listTargets(trx)]);
+    return { settings: row?.state ?? DEFAULT_STATE, targets };
   }
 
   // ------------------------------------------------------ transfer numbers
@@ -217,6 +230,7 @@ export class AiService {
         afterHoursAction: row.after_hours_action,
         afterHoursTransferTargetId: row.after_hours_transfer_target_id,
         emergencyMessage: row.emergency_message,
+        crisisMessage: row.crisis_message,
         urgentAction: row.urgent_action,
         urgentTransferTargetId: row.urgent_transfer_target_id,
         extraUrgentPhrases: row.extra_urgent_phrases,

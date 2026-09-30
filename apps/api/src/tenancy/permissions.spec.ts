@@ -18,13 +18,13 @@ describe('role permissions', () => {
     ['admin', [...PERMISSIONS], []],
     [
       'staff',
-      ['practice:read', 'members:read', 'knowledge:read', 'tasks:read', 'tasks:manage', 'ai:read'],
+      ['practice:read', 'members:read', 'knowledge:read', 'tasks:read', 'tasks:manage', 'ai:read', 'calls:read'],
       ['practice:manage', 'members:manage', 'audit:read', 'knowledge:manage', 'ai:configure'],
     ],
     [
       'viewer',
       ['practice:read'],
-      ['practice:manage', 'members:read', 'members:manage', 'audit:read', 'knowledge:read', 'knowledge:manage', 'tasks:read', 'tasks:manage', 'ai:read', 'ai:configure'],
+      ['practice:manage', 'members:read', 'members:manage', 'audit:read', 'knowledge:read', 'knowledge:manage', 'tasks:read', 'tasks:manage', 'ai:read', 'ai:configure', 'calls:read'],
     ],
   ])('%s has exactly the intended permissions', (role, allowed, denied) => {
     for (const permission of allowed) expect(hasPermission(role, permission)).toBe(true);

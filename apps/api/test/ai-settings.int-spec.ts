@@ -15,8 +15,9 @@ const WEEK: Partial<BusinessHours> = {
 };
 const GREETING = 'Thank you for calling Alpha Family Clinic.';
 const EMERGENCY = 'If this is a medical emergency, please hang up and call 911 right now.';
-const COMPLETE = { greeting: GREETING, emergencyMessage: EMERGENCY, businessHours: WEEK };
-const PROBLEM = { greeting: /greeting/, emergency: /emergency message/, hours: /business hours/ };
+const CRISIS = 'If you are thinking about suicide or hurting yourself, please call or text 988 right now.';
+const COMPLETE = { greeting: GREETING, emergencyMessage: EMERGENCY, crisisMessage: CRISIS, businessHours: WEEK };
+const PROBLEM = { greeting: /greeting/, emergency: /emergency message/, crisis: /crisis message/, hours: /business hours/ };
 
 describe('AI receptionist settings', () => {
   let database: IsolatedDatabase;
@@ -94,6 +95,7 @@ describe('AI receptionist settings', () => {
         enabled: false,
         greeting: '',
         emergencyMessage: '',
+        crisisMessage: '',
         afterHoursAction: 'take_message',
         urgentAction: 'urgent_task',
         urgentTransferTargetId: null,
@@ -101,7 +103,12 @@ describe('AI receptionist settings', () => {
         updatedAt: null,
         ready: false,
       });
-      expect(fresh.problems).toEqual([expect.stringMatching(PROBLEM.greeting), expect.stringMatching(PROBLEM.emergency), expect.stringMatching(PROBLEM.hours)]);
+      expect(fresh.problems).toEqual([
+        expect.stringMatching(PROBLEM.greeting),
+        expect.stringMatching(PROBLEM.emergency),
+        expect.stringMatching(PROBLEM.crisis),
+        expect.stringMatching(PROBLEM.hours),
+      ]);
       expect(Object.keys(fresh.businessHours)).toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
       expect(await storedSettings(beta.practiceId)).toBeUndefined(); // reading does not create anything
     });
@@ -110,15 +117,22 @@ describe('AI receptionist settings', () => {
   describe('the AI cannot be switched on until it is safe', () => {
     it('refuses, and lists everything still missing, when nothing is set', async () => {
       const res = await save({ enabled: true }).expect(409);
-      expect(res.body.message).toEqual([expect.stringMatching(PROBLEM.greeting), expect.stringMatching(PROBLEM.emergency), expect.stringMatching(PROBLEM.hours)]);
+      expect(res.body.message).toEqual([
+        expect.stringMatching(PROBLEM.greeting),
+        expect.stringMatching(PROBLEM.emergency),
+        expect.stringMatching(PROBLEM.crisis),
+        expect.stringMatching(PROBLEM.hours),
+      ]);
       expect(await storedSettings()).toBeUndefined();
     });
 
     it.each([
-      ['no emergency message', { greeting: GREETING, businessHours: WEEK }, PROBLEM.emergency],
+      ['no emergency message', { greeting: GREETING, crisisMessage: CRISIS, businessHours: WEEK }, PROBLEM.emergency],
       ['an emergency message too short to say anything', { ...COMPLETE, emergencyMessage: '911' }, PROBLEM.emergency],
-      ['no greeting', { emergencyMessage: EMERGENCY, businessHours: WEEK }, PROBLEM.greeting],
-      ['no business hours', { greeting: GREETING, emergencyMessage: EMERGENCY }, PROBLEM.hours],
+      ['no crisis message', { greeting: GREETING, emergencyMessage: EMERGENCY, businessHours: WEEK }, PROBLEM.crisis],
+      ['a crisis message too short to say anything', { ...COMPLETE, crisisMessage: '988' }, PROBLEM.crisis],
+      ['no greeting', { emergencyMessage: EMERGENCY, crisisMessage: CRISIS, businessHours: WEEK }, PROBLEM.greeting],
+      ['no business hours', { greeting: GREETING, emergencyMessage: EMERGENCY, crisisMessage: CRISIS }, PROBLEM.hours],
     ])('refuses to switch on with %s', async (_label, body, problem) => {
       const res = await save({ ...body, enabled: true }, token.owner).expect(409);
       expect(JSON.stringify(res.body.message)).toMatch(problem);
@@ -127,7 +141,7 @@ describe('AI receptionist settings', () => {
 
     it('can be filled in first (still off), then switched on once complete', async () => {
       const filled = (await save(COMPLETE).expect(200)).body as AiSettings;
-      expect(filled).toMatchObject({ enabled: false, greeting: GREETING, emergencyMessage: EMERGENCY, ready: true, problems: [] });
+      expect(filled).toMatchObject({ enabled: false, greeting: GREETING, emergencyMessage: EMERGENCY, crisisMessage: CRISIS, ready: true, problems: [] });
       expect(filled.businessHours.mon).toEqual([{ open: '09:00', close: '17:00' }]);
       expect(filled.businessHours.wed).toEqual([]);
       expect(filled.updatedAt).not.toBeNull();
@@ -140,9 +154,11 @@ describe('AI receptionist settings', () => {
     it('cannot be left on while the emergency message, greeting or hours are removed: turn it off first', async () => {
       const blank = await save({ emergencyMessage: '' }).expect(409);
       expect(JSON.stringify(blank.body.message)).toMatch(PROBLEM.emergency);
+      const noCrisis = await save({ crisisMessage: '' }).expect(409);
+      expect(JSON.stringify(noCrisis.body.message)).toMatch(PROBLEM.crisis);
       await save({ greeting: '   ' }).expect(409);
       await save({ businessHours: {} }).expect(409);
-      expect(await storedSettings()).toMatchObject({ enabled: true, emergency_message: EMERGENCY, greeting: GREETING });
+      expect(await storedSettings()).toMatchObject({ enabled: true, emergency_message: EMERGENCY, crisis_message: CRISIS, greeting: GREETING });
 
       await save({ enabled: false }).expect(200); // turning off is always allowed
       const cleared = (await save({ emergencyMessage: '' }).expect(200)).body as AiSettings;
@@ -283,6 +299,7 @@ describe('AI receptionist settings', () => {
       ['a greeting over 500 characters', { greeting: 'g'.repeat(501) }],
       ['a greeting that is not text', { greeting: 42 }],
       ['an emergency message over 500 characters', { emergencyMessage: 'e'.repeat(501) }],
+      ['a crisis message over 500 characters', { crisisMessage: 'c'.repeat(501) }],
       ['enabled given as text', { enabled: 'yes' }],
       ['enabled given as null', { enabled: null }],
       ['an unknown after-hours action', { afterHoursAction: 'ignore' }],
@@ -369,8 +386,9 @@ describe('AI receptionist settings', () => {
         ).rejects.toThrow(/foreign key/);
       });
 
-      it('refuses to switch the AI on without a greeting or an emergency message, even for the database owner', async () => {
+      it('refuses to switch the AI on without a greeting, an emergency message or a crisis message, even for the database owner', async () => {
         await expect(owner.updateTable('ai_settings').set({ enabled: true, emergency_message: '  ' }).where('practice_id', '=', alpha.practiceId).execute()).rejects.toThrow(/check constraint/);
+        await expect(owner.updateTable('ai_settings').set({ enabled: true, crisis_message: '  ' }).where('practice_id', '=', alpha.practiceId).execute()).rejects.toThrow(/check constraint/);
         await expect(owner.updateTable('ai_settings').set({ enabled: true, greeting: '' }).where('practice_id', '=', alpha.practiceId).execute()).rejects.toThrow(/check constraint/);
         const gamma = await seedPractice(owner, 'gamma');
         await expect(
@@ -383,6 +401,7 @@ describe('AI receptionist settings', () => {
               after_hours_action: 'take_message',
               after_hours_transfer_target_id: null,
               emergency_message: '',
+              crisis_message: '',
               urgent_action: 'urgent_task',
               urgent_transfer_target_id: null,
               extra_urgent_phrases: [],

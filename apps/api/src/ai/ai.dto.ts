@@ -1,5 +1,6 @@
 import {
   AFTER_HOURS_ACTIONS,
+  CRISIS_MESSAGE_MAX_LENGTH,
   EMERGENCY_MESSAGE_MAX_LENGTH,
   GREETING_MAX_LENGTH,
   PHONE_PATTERN,
@@ -76,6 +77,12 @@ export class UpdateAiSettingsDto implements UpdateAiSettingsRequest {
   @IsString()
   @MaxLength(EMERGENCY_MESSAGE_MAX_LENGTH)
   emergencyMessage?: string;
+
+  @ValidateIf(provided)
+  @Transform(trim)
+  @IsString()
+  @MaxLength(CRISIS_MESSAGE_MAX_LENGTH)
+  crisisMessage?: string;
 
   @ValidateIf(provided)
   @IsIn(URGENT_ACTIONS)

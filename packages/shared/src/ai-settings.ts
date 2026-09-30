@@ -23,6 +23,8 @@ export type TransferPurpose = (typeof TRANSFER_PURPOSES)[number];
 export const GREETING_MAX_LENGTH = 500;
 export const EMERGENCY_MESSAGE_MIN_LENGTH = 10;
 export const EMERGENCY_MESSAGE_MAX_LENGTH = 500;
+export const CRISIS_MESSAGE_MIN_LENGTH = 10;
+export const CRISIS_MESSAGE_MAX_LENGTH = 500;
 export const URGENT_PHRASE_MIN_LENGTH = 2;
 export const URGENT_PHRASE_MAX_LENGTH = 80;
 export const URGENT_PHRASES_MAX_COUNT = 30;
@@ -166,6 +168,8 @@ export interface AiSettings {
   afterHoursTransferTargetId: string | null;
   /** What callers hear in a medical emergency (who to call). Required, and worded for the practice's country. */
   emergencyMessage: string;
+  /** What callers hear when they mention suicide or self-harm (for example the 988 line in the US). Required, like the emergency message. */
+  crisisMessage: string;
   urgentAction: UrgentAction;
   urgentTransferTargetId: string | null;
   /** Extra words or phrases that mark a call as urgent for this practice (added to the built-in list, never replacing it). */
@@ -185,6 +189,7 @@ export interface UpdateAiSettingsRequest {
   afterHoursAction?: AfterHoursAction;
   afterHoursTransferTargetId?: string | null;
   emergencyMessage?: string;
+  crisisMessage?: string;
   urgentAction?: UrgentAction;
   urgentTransferTargetId?: string | null;
   extraUrgentPhrases?: string[];
@@ -197,6 +202,7 @@ export type AiConfiguration = Pick<
   | 'afterHoursAction'
   | 'afterHoursTransferTargetId'
   | 'emergencyMessage'
+  | 'crisisMessage'
   | 'urgentAction'
   | 'urgentTransferTargetId'
   | 'businessHours'
@@ -204,8 +210,9 @@ export type AiConfiguration = Pick<
 
 /**
  * Everything that must be true before the receptionist may answer calls.
- * The two that matter most for safety, a greeting and an emergency message,
- * are also enforced by the database, so no bug can switch the AI on without them.
+ * The ones that matter most for safety, a greeting, an emergency message and a
+ * crisis message, are also enforced by the database, so no bug can switch the
+ * AI on without them.
  */
 export function aiReadinessProblems(config: AiConfiguration, targets: ReadonlyArray<Pick<TransferTarget, 'id' | 'active'>>): string[] {
   const problems: string[] = [];
@@ -216,6 +223,9 @@ export function aiReadinessProblems(config: AiConfiguration, targets: ReadonlyAr
   }
   if (config.emergencyMessage.trim().length < EMERGENCY_MESSAGE_MIN_LENGTH) {
     problems.push('Write the emergency message callers will hear (who to call in a medical emergency)');
+  }
+  if (config.crisisMessage.trim().length < CRISIS_MESSAGE_MIN_LENGTH) {
+    problems.push('Write the crisis message callers will hear if they mention suicide or self-harm (for example, the 988 line in the US)');
   }
   if (!hasAnyOpeningHours(config.businessHours)) {
     problems.push('Set your business hours');

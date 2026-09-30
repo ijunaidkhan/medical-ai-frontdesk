@@ -16,6 +16,7 @@ export const PERMISSIONS = [
   'tasks:manage',
   'ai:read',
   'ai:configure',
+  'calls:read',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -31,7 +32,7 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   owner: PERMISSIONS,
   admin: PERMISSIONS,
-  staff: ['practice:read', 'members:read', 'knowledge:read', 'tasks:read', 'tasks:manage', 'ai:read'],
+  staff: ['practice:read', 'members:read', 'knowledge:read', 'tasks:read', 'tasks:manage', 'ai:read', 'calls:read'],
   viewer: ['practice:read'],
 };
 

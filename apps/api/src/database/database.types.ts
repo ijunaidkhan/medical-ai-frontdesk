@@ -1,7 +1,15 @@
 import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
 import type {
   AfterHoursAction,
+  AuditActorType,
   BusinessHours,
+  ConversationChannel,
+  ConversationEscalation,
+  ConversationOutcome,
+  ConversationStatus,
+  ToolStatus,
+  TurnSource,
+  TurnSpeaker,
   KnowledgeCategory,
   KnowledgeStatus,
   Role,
@@ -69,6 +77,7 @@ export interface AuditLogsTable {
   id: Generated<string>;
   practice_id: string | null;
   actor_user_id: string | null;
+  actor_type: Generated<AuditActorType>;
   action: string;
   target_type: string | null;
   target_id: string | null;
@@ -120,6 +129,8 @@ export interface StaffTasksTable {
   due_at: Date | null;
   completed_at: Date | null;
   completed_by: string | null;
+  /** The conversation this task came from, when the AI receptionist made it. */
+  conversation_id: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -142,6 +153,7 @@ export interface AiSettingsTable {
   after_hours_action: AfterHoursAction;
   after_hours_transfer_target_id: string | null;
   emergency_message: string;
+  crisis_message: string;
   urgent_action: UrgentAction;
   urgent_transfer_target_id: string | null;
   extra_urgent_phrases: string[];
@@ -149,6 +161,49 @@ export interface AiSettingsTable {
   updated_by: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+}
+
+export interface ConversationsTable {
+  id: Generated<string>;
+  practice_id: string;
+  channel: ConversationChannel;
+  status: Generated<ConversationStatus>;
+  outcome: ConversationOutcome | null;
+  escalation: ConversationEscalation | null;
+  handoff_target_id: string | null;
+  started_by: string | null;
+  model: string | null;
+  turn_count: Generated<number>;
+  started_at: Generated<Date>;
+  ended_at: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface ConversationTurnsTable {
+  id: Generated<string>;
+  practice_id: string;
+  conversation_id: string;
+  seq: number;
+  speaker: TurnSpeaker;
+  source: TurnSource;
+  text: string;
+  guard_reason: string | null;
+  latency_ms: number | null;
+  created_at: Generated<Date>;
+}
+
+export interface ToolInvocationsTable {
+  id: Generated<string>;
+  practice_id: string;
+  conversation_id: string;
+  turn_seq: number;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  status: ToolStatus;
+  duration_ms: number | null;
+  created_at: Generated<Date>;
 }
 
 export interface Database {
@@ -162,6 +217,9 @@ export interface Database {
   staff_tasks: StaffTasksTable;
   transfer_targets: TransferTargetsTable;
   ai_settings: AiSettingsTable;
+  conversations: ConversationsTable;
+  conversation_turns: ConversationTurnsTable;
+  tool_invocations: ToolInvocationsTable;
 }
 
 export type Practice = Selectable<PracticesTable>;

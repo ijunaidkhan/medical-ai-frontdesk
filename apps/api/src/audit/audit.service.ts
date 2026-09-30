@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { AUDIT_PAGE_DEFAULT, type AuditLogPage } from '@frontdesk/shared';
+import { AUDIT_PAGE_DEFAULT, type AuditActorType, type AuditLogPage } from '@frontdesk/shared';
 import { sql } from 'kysely';
 import type { AuthContext } from '../auth/auth-context.js';
 import { TenantDb } from '../tenancy/tenant-db.js';
@@ -9,6 +9,7 @@ import type { AuditQuery } from './audit.dto.js';
 interface AuditRow {
   id: string;
   action: string;
+  actor_type: AuditActorType;
   actor_user_id: string | null;
   actor_name: string | null;
   target_type: string | null;
@@ -37,6 +38,7 @@ export class AuditService {
       const result = await sql<AuditRow>`
         select a.id,
                a.action,
+               a.actor_type,
                a.actor_user_id,
                u.display_name as actor_name,
                a.target_type,
@@ -60,6 +62,7 @@ export class AuditService {
       items: page.map((row) => ({
         id: row.id,
         action: row.action,
+        actorType: row.actor_type,
         actorUserId: row.actor_user_id,
         actorName: row.actor_name,
         targetType: row.target_type,

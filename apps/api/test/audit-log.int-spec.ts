@@ -90,7 +90,7 @@ describe('audit log endpoint', () => {
     const login = page.items.find((entry) => entry.action === 'auth.login.success' && entry.ip === ip)!;
 
     expect(login).toBeDefined();
-    expect(Object.keys(login).sort()).toEqual(['action', 'actorName', 'actorUserId', 'id', 'ip', 'metadata', 'occurredAt', 'requestId', 'targetId', 'targetType']);
+    expect(Object.keys(login).sort()).toEqual(['action', 'actorName', 'actorType', 'actorUserId', 'id', 'ip', 'metadata', 'occurredAt', 'requestId', 'targetId', 'targetType']);
     expect(login.actorName).toBe('Member viewer@alpha.test');
     expect(login.requestId).toMatch(/^[0-9a-f-]{36}$/);
     expect(new Date(login.occurredAt).getTime()).toBeGreaterThan(Date.now() - 60_000);

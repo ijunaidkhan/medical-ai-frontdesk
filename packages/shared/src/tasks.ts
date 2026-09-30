@@ -50,6 +50,8 @@ export interface Task {
   /** Who made it: a staff member, or the AI receptionist. */
   createdBy: { kind: 'user'; person: TaskPerson | null } | { kind: 'ai' };
   assignedTo: TaskPerson | null;
+  /** The conversation it came from, when the AI receptionist created it. */
+  conversationId: string | null;
   dueAt: string | null;
   completedAt: string | null;
   createdAt: string;

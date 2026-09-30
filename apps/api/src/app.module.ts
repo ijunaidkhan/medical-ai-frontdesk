@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AgentModule } from './agent/agent.module.js';
 import { AiModule } from './ai/ai.module.js';
 import { AuditModule } from './audit/audit.module.js';
 import { AccessTokenGuard } from './auth/access-token.guard.js';
@@ -45,6 +46,7 @@ import { TenancyModule } from './tenancy/tenancy.module.js';
     KnowledgeModule,
     TasksModule,
     AiModule,
+    AgentModule,
   ],
   providers: [
     // Guards run in the order they are listed:

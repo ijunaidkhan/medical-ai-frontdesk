@@ -24,6 +24,7 @@ interface TaskRow {
   contact_phone: string | null;
   created_by_type: 'user' | 'ai';
   created_by: string | null;
+  conversation_id: string | null;
   creator_name: string | null;
   assigned_to: string | null;
   assignee_name: string | null;
@@ -49,6 +50,7 @@ function toTask(row: TaskRow): Task {
         ? { kind: 'ai' }
         : { kind: 'user', person: row.created_by && row.creator_name ? { userId: row.created_by, name: row.creator_name } : null },
     assignedTo: row.assigned_to && row.assignee_name ? { userId: row.assigned_to, name: row.assignee_name } : null,
+    conversationId: row.conversation_id,
     dueAt: row.due_at?.toISOString() ?? null,
     completedAt: row.completed_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
@@ -112,6 +114,8 @@ export class TasksService {
     input: CreateTaskDto,
     actor: TaskActor,
     meta: RequestMeta,
+    /** The conversation the task came from (set when the AI receptionist makes it). */
+    conversationId: string | null = null,
   ): Promise<string> {
     if (input.assignedTo) {
       await this.requireActiveMember(trx, practiceId, input.assignedTo);
@@ -132,6 +136,7 @@ export class TasksService {
         due_at: input.dueAt ? new Date(input.dueAt) : null,
         completed_at: null,
         completed_by: null,
+        conversation_id: conversationId,
       })
       .returning('id')
       .executeTakeFirstOrThrow();
@@ -139,6 +144,7 @@ export class TasksService {
     await writeAuditLog(trx, {
       practiceId,
       actorUserId: actor.kind === 'user' ? actor.userId : null,
+      actorType: actor.kind === 'user' ? 'user' : 'ai',
       action: 'task.created',
       targetType: 'task',
       targetId: id,
@@ -250,6 +256,7 @@ export class TasksService {
         't.contact_phone',
         't.created_by_type',
         't.created_by',
+        't.conversation_id',
         'creator.display_name as creator_name',
         't.assigned_to',
         'assignee.display_name as assignee_name',

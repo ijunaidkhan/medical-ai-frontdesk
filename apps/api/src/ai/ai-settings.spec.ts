@@ -153,6 +153,7 @@ describe('aiReadinessProblems', () => {
     afterHoursAction: 'take_message',
     afterHoursTransferTargetId: null,
     emergencyMessage: 'If this is a medical emergency, hang up and call 911 now.',
+    crisisMessage: 'If you are thinking about suicide, please call or text 988 now.',
     urgentAction: 'urgent_task',
     urgentTransferTargetId: null,
     businessHours: weekdays('09:00', '17:00'),
@@ -167,6 +168,8 @@ describe('aiReadinessProblems', () => {
     ['a missing greeting', { greeting: '   ' }, /greeting/],
     ['a missing emergency message', { emergencyMessage: '' }, /emergency message/],
     ['an emergency message that is only a few characters', { emergencyMessage: '911' }, /emergency message/],
+    ['a missing crisis message', { crisisMessage: '' }, /crisis message/],
+    ['a crisis message that is only a few characters', { crisisMessage: '988' }, /crisis message/],
     ['no business hours', { businessHours: emptyBusinessHours() }, /business hours/],
   ])('reports %s', (_label, change, message) => {
     const problems = aiReadinessProblems({ ...ready, ...change }, active);
@@ -188,7 +191,7 @@ describe('aiReadinessProblems', () => {
   });
 
   it('lists every problem at once', () => {
-    const empty: AiConfiguration = { ...ready, greeting: '', emergencyMessage: '', businessHours: emptyBusinessHours(), urgentAction: 'transfer', afterHoursAction: 'transfer' };
-    expect(aiReadinessProblems(empty, [])).toHaveLength(5);
+    const empty: AiConfiguration = { ...ready, greeting: '', emergencyMessage: '', crisisMessage: '', businessHours: emptyBusinessHours(), urgentAction: 'transfer', afterHoursAction: 'transfer' };
+    expect(aiReadinessProblems(empty, [])).toHaveLength(6);
   });
 });

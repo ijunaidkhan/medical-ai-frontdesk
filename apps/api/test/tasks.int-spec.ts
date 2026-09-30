@@ -414,7 +414,9 @@ describe('staff tasks', () => {
       expect(await row(id)).toMatchObject({ created_by_type: 'ai', created_by: null });
       const entry = (await audit('task.created', id))[0]!;
       expect(entry.actor_user_id).toBeNull();
+      expect(entry.actor_type).toBe('ai'); // never mistaken for the staff member who happened to be signed in
       expect(entry.metadata).toMatchObject({ source: 'ai' });
+      expect(task.conversationId).toBeNull(); // (no conversation in this direct call)
     });
   });
 
