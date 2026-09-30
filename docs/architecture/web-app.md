@@ -44,7 +44,9 @@ The menu, page guards and dashboard sections use `hasPermission` from `@frontdes
 | `/login` | signed-out | `POST /api/auth/login` |
 | `/dashboard` | everyone | practice details, your role and what it allows; team counts (`members:read`); latest activity (`audit:read`) |
 | `/team` | `members:read` | member list (read-only) |
+| `/knowledge` | `knowledge:read` to read and search, `knowledge:manage` to change (owner, admin) | the information the AI receptionist may use: list (archived entries behind a toggle), editor, **Approve / Archive / Restore**, and a "What would the AI find?" search that shows exactly the approved text a caller's question would bring up. Changing the wording of an approved entry warns first and, once saved, says it is a draft again. Unsaved wording is never thrown away silently: opening another entry is refused until it is saved or discarded |
 | `/ai` | `ai:read` to see, `ai:configure` to change (owner, admin) | the AI receptionist's settings and transfer numbers: greeting (with the always-added AI notice), medical-emergency message, crisis message, business hours (24-hour text boxes, because a browser time box cannot show 24:00), after-hours and urgent handling, extra urgent phrases, on/off with the list of what still blocks turning it on. Changes are saved together and only what changed is sent; turning it on or off is a separate button and is disabled while there are unsaved changes |
+| `/test-chat` | `ai:configure` (owner, admin) | try the real AI receptionist in writing: start a chat (it opens with the greeting), reply as the caller, see each answer. Says up front that what the AI does is real (a message it saves is a real task; nothing is sent to a patient). Fixed safety messages are labelled "not written by the AI", a reply replaced by the safety check says so, the escalation banner and the number of tasks created are shown, and a chat that ended (hand-over, goodbye, limit) says how. A message that could not be answered goes back into the box. A chat belongs to one practice: switching practice clears it. If the AI is not set up it lists everything missing with a link to the settings, and without a configured language model it says so (503) |
 | `/activity` | `audit:read` | audit log, 25 at a time, "Load more" |
 
 Switching practice (menu shown when the person belongs to more than one) starts a new session in that practice and returns to the dashboard; every page reloads its data whenever the practice changes, and a slow answer for the practice just left is ignored.
@@ -53,11 +55,11 @@ Times are shown in the practice's own time zone.
 
 ## Testing
 
-193 unit and component tests (Vitest, jsdom, real interceptor and services against a fake HTTP backend), plus mutation checks on the security behaviours (token storage, interceptor scope and retry limits, return-URL check, guards, per-role menu and requests). The whole stack was also exercised over real HTTP through the dev server's proxy (login, refresh, CSRF origin refusal, switch practice, logout).
+about 240 unit and component tests (Vitest, jsdom, real interceptor and services against a fake HTTP backend), plus mutation checks on the security behaviours (token storage, interceptor scope and retry limits, return-URL check, guards, per-role menu and requests). The whole stack was also exercised over real HTTP through the dev server's proxy (login, refresh, CSRF origin refusal, switch practice, logout).
 
 ## Known limits
 
 - **Not yet checked in a real browser or with an accessibility tool.** Semantics (labels, `aria-invalid`, `role="alert"`, landmarks, skip link, focus styles) are tested in jsdom, but nobody has looked at it on screen yet.
-- Editing the practice or managing team members is available in the API but has no screens yet. Screens for knowledge, staff tasks, conversation review and the test chat are the next steps of the AI receptionist plan ([ai-receptionist.md](ai-receptionist.md)).
+- Editing the practice or managing team members is available in the API but has no screens yet. Screens for staff tasks and conversation review are the next steps of the AI receptionist plan ([ai-receptionist.md](ai-receptionist.md)).
 - No password reset, invitations or multi-factor sign-in (see authentication.md).
 - No end-to-end browser tests (for example Playwright) yet.

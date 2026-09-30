@@ -14,8 +14,11 @@ Status: **approved 2026-09-30, in progress.** M2a is being built in small steps;
 | 4c. Agent runtime: model interface + scripted model, tools, conversation flow, test-chat endpoint, transcript API | **done** (`apps/api/src/agent`; no migration needed) |
 | 4d. A separate **crisis message** for suicide and self-harm (for example 988 in the US), next to the medical-emergency message (911) | **done** (migration 0009) |
 | 5a. Web: AI settings screen (messages, hours, urgent handling, transfer numbers, on/off) | **done** (`/ai`) |
-| 5b–5e. Web: knowledge, staff tasks, conversation review, test chat | next, in that order |
-| 6. Real model adapter and the conversation test set | needs the operator's LLM key |
+| 5b. Web: knowledge screen (write, approve, archive, "what would the AI find?" search) | **done** (`/knowledge`) |
+| 5e. Web: test chat | **done** (`/test-chat`) |
+| 5c–5d. Web: staff tasks, conversation review | next |
+| 6a. Real model adapter (Claude via Anthropic's API), configuration, tests against a stand-in server | **done**; needs the operator's key in `.env` to use |
+| 6b. Conversation test set run against the real model (emergency phrases, diagnosis and dosage requests, unanswerable questions, prompt injection, false booking claims) | needs the operator's key; run once the test chat screen exists |
 
 **Knowledge base rules (implemented):** a source is a draft until a person approves it; only approved sources have searchable chunks; editing the title or content of an approved source returns it to draft and removes its chunks at once, so the AI can never use unreviewed wording; archiving removes it; nothing is ever deleted (archived, not erased). Search is PostgreSQL full-text search with the caller's words OR-ed and ranked, tenant-scoped by row-level security, and returns nothing rather than guessing when nothing matches. Composite foreign keys make it impossible for a chunk to point at another practice's source.
 
@@ -42,11 +45,21 @@ Status: **approved 2026-09-30, in progress.** M2a is being built in small steps;
 5. **Reply checker (code).** The reply is checked; an unsafe, empty or missing reply (including a model outage or a 20-second timeout) is replaced by a fixed safe line, marked on the transcript with the reason. The model's blocked words are not stored.
 6. **Store and finish.** The reply is stored, with how it was produced (model, or which fixed script). Outcomes: `emergency` if the conversation was ever an emergency, `message_taken` if it created a task, otherwise `answered`; a hand-over ends as `handed_off` (or `emergency`). A conversation over 30 caller messages is ended with a fixed line plus the emergency message, but an emergency message inside it is still handled first.
 
-Nothing here can be reached without a language model being configured, except the fixed safety scripts: a test chat cannot *start* (503) until an operator sets a model up. The default model is "unconfigured"; tests use a scripted fake, and the real vendor adapter is step 6.
+Nothing here can be reached without a language model being configured, except the fixed safety scripts: a test chat cannot *start* (503) until an operator sets a model up. The default model is "unconfigured"; tests use a scripted fake.
+
+**The real model (step 6a, implemented): Claude through Anthropic's API** (`agent/model/anthropic-model.ts`), chosen by the operator in `.env` with `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` (default `claude-sonnet-5-5`; `claude-haiku-4-5-20251001` is faster and cheaper). It is one HTTPS call with the platform's `fetch`, so there is no new dependency, and it sits behind the same interface as everything else, so another vendor is another adapter. Rules:
+
+- **The key** comes only from the environment, is validated at startup (missing or too short with the provider on stops the API with a message that never contains the value), is sent only in a request header to `api.anthropic.com` (the address cannot be configured), and never appears in logs, errors, the API, the database or the repository.
+- **What is sent to Anthropic:** the instructions (including the practice's name), the conversation so far, and tool results (for example approved knowledge text). Never a practice id, a user account or a key. Because call content leaves the system, **the operator's agreement with Anthropic must cover this use before real patients call.**
+- **Translation:** the conversation has to start with the caller, so the greeting moves into the system text; tool calls and results become `tool_use` / `tool_result` blocks; on the final round, when no tools are offered, earlier tool blocks are written as plain text (the API refuses them otherwise); back-to-back messages from one side are merged.
+- **Failures:** a network failure, timeout, rate limit (429) or server error becomes "unavailable" and a wrong key or bad request becomes "request refused"; either way the caller gets the fixed safe line, the turn is marked `model_unavailable` or `model_error`, and the log carries the status number only, never the vendor's text. The conversation carries on.
+- **Unchanged by the vendor:** emergencies never reach the model, every reply is checked, tools are validated by the backend, and after an emergency only the two message-only tools are offered.
+- **Tests:** unit tests of the translation against a fake `fetch`, and integration tests that run the whole stack (database, tools, knowledge search, checks) over real HTTP against a local stand-in for Anthropic's API, covering the tool round trip, failure codes and what is and is not sent. **A run against the real service still has to be done once by the operator with a real key** (the test chat screen is how).
 
 Test chat (`POST /api/agent/test-conversations` and `.../:id/messages`) needs `ai:configure` and works before the AI is switched on, but only when the practice has a greeting and an emergency message (409 lists what is missing). Transcripts and tool calls are read with `calls:read`, and every view of a transcript is audited (`conversation.viewed`). Escalations are audited as `conversation.escalated` by the "system" actor, with the level and what happened, never the caller's words.
 
-**Known limits:** a model's reply text that the checker blocks is not kept (only the reason). A test chat is one stream per conversation, so two messages sent at the same instant are ordered by the database but may interleave. The vendor adapter must merge or order the first assistant message (the greeting) as its API requires.
+**Known limits:** a model's reply text that the checker blocks is not kept (only the reason). A test chat is one stream per conversation, so two messages sent at the same instant are ordered by the database but may interleave.
+**Phone calls (M2b)** are proposed in [telephony-voice.md](telephony-voice.md) and wait for approval.
 
 ## Order of work
 
