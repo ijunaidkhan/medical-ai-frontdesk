@@ -82,6 +82,10 @@ export const PERMISSION_DESCRIPTIONS: Readonly<Record<Permission, string>> = {
   'ai:read': 'See how the AI receptionist is set up',
   'ai:configure': 'Change how the AI receptionist behaves and turn it on or off',
   'calls:read': 'Read conversations with the AI receptionist',
+  'schedule:read': 'See the appointment calendar',
+  'schedule:manage': 'Book, cancel and move appointments',
+  'schedule:configure': 'Set up providers, appointment types, hours and booking rules',
+  'patients:read': 'Find patients and see their contact details',
 };
 
 const AUDIT_LABELS: Readonly<Record<string, string>> = {
@@ -107,6 +111,15 @@ const AUDIT_LABELS: Readonly<Record<string, string>> = {
   'task.assigned': 'Task assigned',
   'task.status_changed': 'Task status changed',
   'ai.settings_updated': 'AI receptionist settings changed',
+  'provider.created': 'Provider added',
+  'provider.updated': 'Provider changed',
+  'appointment_type.created': 'Appointment type added',
+  'appointment_type.updated': 'Appointment type changed',
+  'time_off.created': 'Provider time off added',
+  'time_off.cancelled': 'Provider time off cancelled',
+  'scheduling.settings_updated': 'Booking rules changed',
+  'scheduling.ai_booking_enabled': 'AI receptionist allowed to book appointments',
+  'scheduling.ai_booking_disabled': 'AI receptionist no longer allowed to book appointments',
   'phone_number.added': 'Phone number connected',
   'phone_number.enabled': 'Phone number switched on',
   'phone_number.disabled': 'Phone number switched off',

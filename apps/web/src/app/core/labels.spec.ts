@@ -22,6 +22,12 @@ describe('auditLabel', () => {
     ['ai.enabled', 'AI receptionist turned on'],
     ['phone_number.added', 'Phone number connected'],
     ['phone_number.disabled', 'Phone number switched off'],
+    ['provider.created', 'Provider added'],
+    ['appointment_type.updated', 'Appointment type changed'],
+    ['time_off.cancelled', 'Provider time off cancelled'],
+    ['scheduling.settings_updated', 'Booking rules changed'],
+    ['scheduling.ai_booking_enabled', 'AI receptionist allowed to book appointments'],
+    ['scheduling.ai_booking_disabled', 'AI receptionist no longer allowed to book appointments'],
     ['conversation.escalated', 'Emergency or urgent call handled by the safety rules'],
     ['conversation.viewed', 'Conversation transcript viewed'],
   ])('describes %s in plain words', (action, label) => {

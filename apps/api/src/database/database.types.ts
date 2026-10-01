@@ -197,6 +197,57 @@ export interface PhoneNumbersTable {
   updated_at: Generated<Date>;
 }
 
+export interface SchedulingSettingsTable {
+  practice_id: string;
+  slot_minutes: Generated<number>;
+  min_notice_hours: Generated<number>;
+  max_advance_days: Generated<number>;
+  cancel_min_hours: Generated<number>;
+  ai_booking_enabled: Generated<boolean>;
+  updated_by: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface ProvidersTable {
+  id: Generated<string>;
+  practice_id: string;
+  name: string;
+  title: Generated<string>;
+  hours: Generated<BusinessHours>;
+  active: Generated<boolean>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface AppointmentTypesTable {
+  id: Generated<string>;
+  practice_id: string;
+  name: string;
+  duration_minutes: number;
+  active: Generated<boolean>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface ProviderAppointmentTypesTable {
+  practice_id: string;
+  provider_id: string;
+  appointment_type_id: string;
+}
+
+export interface ProviderTimeOffTable {
+  id: Generated<string>;
+  practice_id: string;
+  provider_id: string;
+  starts_at: Date;
+  ends_at: Date;
+  reason: Generated<string>;
+  active: Generated<boolean>;
+  created_by: string | null;
+  created_at: Generated<Date>;
+}
+
 export interface ConversationTurnsTable {
   id: Generated<string>;
   practice_id: string;
@@ -237,6 +288,11 @@ export interface Database {
   transfer_targets: TransferTargetsTable;
   ai_settings: AiSettingsTable;
   phone_numbers: PhoneNumbersTable;
+  scheduling_settings: SchedulingSettingsTable;
+  providers: ProvidersTable;
+  appointment_types: AppointmentTypesTable;
+  provider_appointment_types: ProviderAppointmentTypesTable;
+  provider_time_off: ProviderTimeOffTable;
   conversations: ConversationsTable;
   conversation_turns: ConversationTurnsTable;
   tool_invocations: ToolInvocationsTable;

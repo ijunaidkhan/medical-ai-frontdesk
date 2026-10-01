@@ -10,3 +10,4 @@ export * from './tasks.js';
 export * from './ai-settings.js';
 export * from './conversations.js';
 export * from './voice.js';
+export * from './scheduling.js';

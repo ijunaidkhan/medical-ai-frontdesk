@@ -43,7 +43,7 @@ const provided = (_: unknown, value: unknown) => value !== undefined;
 const present = (_: unknown, value: unknown) => value !== undefined && value !== null;
 
 @ValidatorConstraint({ name: 'isBusinessHours', async: false })
-class BusinessHoursConstraint implements ValidatorConstraintInterface {
+export class BusinessHoursConstraint implements ValidatorConstraintInterface {
   validate(value: unknown): boolean {
     return validateBusinessHours(value) === null;
   }

@@ -68,7 +68,7 @@ Test chat (`POST /api/agent/test-conversations` and `.../:id/messages`) needs `a
 |---|---|
 | **M2a** | Knowledge base, agent (text channel), tools, safety and escalation, staff tasks, call review, a text "test chat" in the web app |
 | **M2b** | Phone number, real calls, speech in and out, transfers |
-| **M3** | Appointments (book, cancel, reschedule) with SMS confirmations |
+| **M3** | Appointments (book, cancel, reschedule); proposed in [scheduling.md](scheduling.md), waiting for approval. SMS confirmations come after it |
 | **M4+** | EHR integrations, analytics, payments |
 
 The brain is built and tested in text first: safety, answering only from approved facts and tool rules are the risky parts, and they are far cheaper to test without a phone line. The phone then connects to the same brain.

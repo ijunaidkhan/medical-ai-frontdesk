@@ -18,13 +18,29 @@ describe('role permissions', () => {
     ['admin', [...PERMISSIONS], []],
     [
       'staff',
-      ['practice:read', 'members:read', 'knowledge:read', 'tasks:read', 'tasks:manage', 'ai:read', 'calls:read'],
-      ['practice:manage', 'members:manage', 'audit:read', 'knowledge:manage', 'ai:configure'],
+      ['practice:read', 'members:read', 'knowledge:read', 'tasks:read', 'tasks:manage', 'ai:read', 'calls:read', 'schedule:read', 'schedule:manage', 'patients:read'],
+      ['practice:manage', 'members:manage', 'audit:read', 'knowledge:manage', 'ai:configure', 'schedule:configure'],
     ],
     [
       'viewer',
       ['practice:read'],
-      ['practice:manage', 'members:read', 'members:manage', 'audit:read', 'knowledge:read', 'knowledge:manage', 'tasks:read', 'tasks:manage', 'ai:read', 'ai:configure', 'calls:read'],
+      [
+        'practice:manage',
+        'members:read',
+        'members:manage',
+        'audit:read',
+        'knowledge:read',
+        'knowledge:manage',
+        'tasks:read',
+        'tasks:manage',
+        'ai:read',
+        'ai:configure',
+        'calls:read',
+        'schedule:read',
+        'schedule:manage',
+        'schedule:configure',
+        'patients:read',
+      ],
     ],
   ])('%s has exactly the intended permissions', (role, allowed, denied) => {
     for (const permission of allowed) expect(hasPermission(role, permission)).toBe(true);
@@ -48,8 +64,14 @@ describe('role permissions', () => {
     expect(ROLE_PERMISSIONS.viewer.filter(isWriteOrAudit)).toEqual([]);
   });
 
-  it('keeps every write, configuration and audit permission away from staff EXCEPT working the task queue', () => {
-    // Staff answer the phones and work callbacks, so tasks:manage is deliberate; nothing else is.
-    expect(ROLE_PERMISSIONS.staff.filter(isWriteOrAudit)).toEqual(['tasks:manage']);
+  it('keeps every write, configuration and audit permission away from staff EXCEPT working the task queue and booking appointments', () => {
+    // Staff answer the phones, work callbacks and book visits, so these two are deliberate; nothing else is.
+    expect(ROLE_PERMISSIONS.staff.filter(isWriteOrAudit)).toEqual(['tasks:manage', 'schedule:manage']);
+  });
+
+  it('only owners and admins may set up providers, appointment types and booking rules', () => {
+    expect(hasPermission('staff', 'schedule:configure')).toBe(false);
+    expect(hasPermission('admin', 'schedule:configure')).toBe(true);
+    expect(hasPermission('owner', 'schedule:configure')).toBe(true);
   });
 });

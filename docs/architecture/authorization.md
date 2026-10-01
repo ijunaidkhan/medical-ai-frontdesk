@@ -15,12 +15,15 @@ Status: implemented (milestone 1, step 5). Code: `apps/api/src/tenancy`, `member
 | `knowledge:manage` (write, approve, archive it) | yes | yes | | |
 | `tasks:read` (see the callback and message queue) | yes | yes | yes | |
 | `tasks:manage` (create, assign, complete tasks) | yes | yes | yes | |
-
 | `ai:read` (see how the AI receptionist is set up) | yes | yes | yes | |
 | `ai:configure` (change it, turn it on or off) | yes | yes | | |
 | `calls:read` (read conversations with the AI receptionist) | yes | yes | yes | |
+| `schedule:read` (see providers, appointment types, rules, availability, later the calendar) | yes | yes | yes | |
+| `schedule:manage` (book, cancel and move appointments; used from scheduling step 2) | yes | yes | yes | |
+| `schedule:configure` (providers, hours, days off, appointment types, booking rules) | yes | yes | | |
+| `patients:read` (find patients and see their contact details; used from scheduling step 2) | yes | yes | yes | |
 
-Staff hold `tasks:manage` on purpose: they answer the phones and work the callback queue. It is the only write permission staff have.
+Staff hold `tasks:manage` and `schedule:manage` on purpose: they answer the phones, work the callback queue and book appointments. Those are the only write permissions staff have; they cannot change how scheduling is set up.
 
 The API enforces this. The web app imports the same table only to hide controls that would be refused anyway. Adding a role without deciding its permissions is a compile error.
 
@@ -75,6 +78,8 @@ The API's database role can update only `practices(name, timezone, phone)` and `
 | `GET /api/conversations?limit&cursor`, `GET /api/conversations/:id` | `calls:read` | Conversation list (newest first, cursor paging) and full transcript with every tool call; viewing a transcript is audited (`conversation.viewed`) |
 | `GET /api/ai/phone-numbers` | `ai:read` | The phone numbers connected to the practice (read-only; the operator connects them with `npm run phone`). See [telephony-voice.md](telephony-voice.md) |
 | `POST /api/voice/incoming`, `POST /api/voice/action`, WebSocket `/api/voice/relay` (more in the next steps) | none: public, but every request must carry a valid Twilio signature (403 otherwise; 404 while voice is off) | Incoming calls from Twilio; answers with TwiML (XML). Not reachable with a user login and never acts for a signed-in user. The practice comes only from the dialed number |
+| `GET /api/scheduling/settings`, `/api/providers`, `/api/providers/:id`, `/api/providers/:id/time-off`, `/api/appointment-types`, `/api/availability` | `schedule:read` | Booking rules, providers with their hours, days off, visit types, and the open times a caller would be offered (see [scheduling.md](scheduling.md)) |
+| `PATCH /api/scheduling/settings`, `POST`/`PATCH /api/providers`, `POST /api/providers/:id/time-off`, `POST /api/provider-time-off/:id/cancel`, `POST`/`PATCH /api/appointment-types` | `schedule:configure` | Set up scheduling. Nothing is deleted (switched off or cancelled). AI booking cannot be switched on until a provider with hours offers an appointment type (409 lists what is missing). Audited by field names only |
 | `GET /api/auth/me`, `POST /api/auth/switch-practice` | any active member | |
 
 ## Known limits and deferred work
