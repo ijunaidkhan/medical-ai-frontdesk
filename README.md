@@ -27,7 +27,7 @@ npm run api:dev           # API on http://localhost:3000 (builds shared first)
 npm run web:start         # web on http://localhost:4200 (forwards /api to the API)
 ```
 
-Open http://localhost:4200 and sign in with the account you created with `npm run bootstrap`. Start the API first: the web app talks to it through the dev server's proxy. Details: [web app](docs/architecture/web-app.md).
+Open http://localhost:4200 and sign in with the account you created with `npm run bootstrap`. Start the API first: the web app talks to it through the dev server's proxy. Details: [web app](docs/architecture/web-app.md). Product notes: [competitors and positioning](docs/product/competitors.md).
 
 ### Or run everything in Docker
 
