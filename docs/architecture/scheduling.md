@@ -1,6 +1,6 @@
 # Scheduling (milestone 3): proposal
 
-Status: **approved 2026-10-01; step 1 of 5 built** (steps 2 to 5 are still to do). Decisions taken with the operator (2026-10-01): appointments belong to **providers**, each with their own hours; a caller is identified by **name + phone + date of birth**; the schedule lives **in our own database first** (calendar or EHR connections later).
+Status: **approved 2026-10-01; steps 1 and 2 of 5 built** (steps 3 to 5 are still to do). Decisions taken with the operator (2026-10-01): appointments belong to **providers**, each with their own hours; a caller is identified by **name + phone + date of birth**; the schedule lives **in our own database first** (calendar or EHR connections later).
 
 ## What we are building
 
@@ -70,7 +70,7 @@ Caller ─► AI (text or phone) ─► asks for a tool ─► BACKEND decides �
 ## Steps (each tested and reported before the next)
 
 1. Foundations: tables, permissions, the availability engine, and the staff API for providers, types, hours, days off and rules. **Done** (see "Step 1 as built" below).
-2. Patients and appointments (staff API): booking rules, the exclusion constraint, cancel and reschedule, idempotency, audit.
+2. Patients and appointments (staff API): booking rules, the exclusion constraint, cancel and reschedule, idempotency, audit. **Done** (see "Step 2 as built" below).
 3. AI scheduling: the tools, identity checks, backend-written confirmations, and the AI scheduling switch.
 4. Web: schedule, providers, types, rules, patient search.
 5. Conversation test set against the real models, and the documentation.
@@ -95,6 +95,41 @@ Caller ─► AI (text or phone) ─► asks for a tool ─► BACKEND decides �
 **Availability engine** (`availability.ts`, `zoned-time.ts`): pure code with no database. Hours are read on the practice's own clock, so daylight-saving changes are handled (a time that does not exist that day is never offered; one that happens twice is offered once). Start times are on a grid counted from the start of each working period; a visit must finish within the period.
 
 **Audit events** (identifiers and field names only, never names, reasons or other free text): `provider.created`, `provider.updated`, `appointment_type.created`, `appointment_type.updated`, `time_off.created`, `time_off.cancelled`, `scheduling.settings_updated`, `scheduling.ai_booking_enabled`, `scheduling.ai_booking_disabled`.
+
+## Step 2 as built
+
+**Migration `0013_patients_and_appointments`** (adds the `btree_gist` extension, which lets one exclusion constraint cover a provider and a time range):
+
+- `patients`: first name, last name, date of birth, phone (international format), who created it (a person or the AI). The same name (any capitals), date of birth and phone exists once per practice (unique index). The API can add and read, never edit or delete (editing a patient is a later step).
+- `appointments`: patient, provider, visit type, start and end (the end is the start plus the visit's length at booking time), status (`booked`, `cancelled`, `completed`, `no_show`), who booked it (person or AI), the appointment it replaced when moved, an idempotency key, and who cancelled it, when and why. **The database refuses overlapping appointments for one provider and for one patient** (two exclusion constraints; a cancelled appointment frees its time, a completed or no-show one still holds it). Composite foreign keys keep every reference inside one practice. The API can add and read, and may update only the status and cancellation fields; the time, patient, provider and key can never be rewritten, and nothing is deleted.
+
+**Endpoints** (permissions in [authorization.md](authorization.md)):
+
+| Method and path | What it does |
+|---|---|
+| `POST /api/patients` | Adds a patient, or returns the one who already matches on name, date of birth and phone (201 new, 200 existing). |
+| `GET /api/patients?q=&limit=` | Search by the start of a first or last name (several words must all match) or part of a phone number; at least 2 characters, at most 25 results; `%` and `_` are ordinary characters. Audited as `patient.searched` with the number shown, never the text typed. |
+| `GET /api/patients/:id` | One patient; audited as `patient.viewed`. |
+| `GET /api/appointments?from&to&providerId&patientId&status&limit` | The calendar: appointments overlapping a window (default the next 7 days, at most 62), booked ones unless a status or `all` is asked for. Shows the patient's name only, never date of birth or phone. |
+| `GET /api/appointments/:id` | One appointment. |
+| `POST /api/appointments` | Books. Needs an `Idempotency-Key` header (8 to 100 letters, digits, `-`, `_`). 201 when booked; **200 with the same appointment when the same key is sent again**; 409 if the same key is used for a different request. |
+| `POST /api/appointments/:id/cancel` | Cancels (optional reason, kept as a record, never in the audit log). |
+| `POST /api/appointments/:id/reschedule` | Books the new time and releases the old one in one transaction, or neither; returns the new appointment, which points back at the old one. Optional `providerId` to move to another provider who offers the visit. Needs an `Idempotency-Key`. |
+
+**How a booking is checked** (the same code will serve the AI receptionist in step 3, with the actor "AI" and the "caller" rules):
+
+1. A repeated key returns the earlier result (or is refused if the request differs). Two identical requests at the same instant also book once.
+2. The patient, provider and visit type must exist in this practice, be active, and the provider must offer the visit.
+3. The exact start time must be one that would be offered right now (the availability engine, with the provider's days off and existing appointments). Otherwise 409 "That time is not available".
+4. The database has the last word: if another booking took the time between the check and the insert, the exclusion constraint refuses it and the person is told "That time was just taken". Many callers booking one time at once end with exactly one appointment (tested).
+
+**Staff versus caller rules.** A person at the front desk (`staff` mode) is limited by the provider's hours, days off, existing appointments, the slot grid and "not in the past" (and a year ahead at most), but **not** by the practice's minimum notice or furthest-ahead rules, which exist for callers. The AI receptionist (`caller` mode) is bound by every rule, and also by the **cancellation window**: it cannot cancel or move an appointment closer than the configured number of hours, or one that has already started; the refusal is a distinct error so the AI can offer to take a message for staff. Staff may cancel at any time.
+
+**Audit events** (identifiers only, never names, dates of birth, phones, reasons or times): `patient.created`, `patient.viewed`, `patient.searched`, `appointment.booked`, `appointment.cancelled`, `appointment.rescheduled` (one event for a move, not a cancel plus a booking). Actor is the person, or "AI receptionist" with no user.
+
+**Availability** now removes booked times (including a visit that would run into a booked time just past the end of the searched window).
+
+**Not in this step:** editing a patient, marking an appointment completed or no-show (the statuses exist; nothing sets them yet), the AI tools and identity checks (step 3), and the web screens (step 4).
 
 ## Risks and things that need a human decision
 

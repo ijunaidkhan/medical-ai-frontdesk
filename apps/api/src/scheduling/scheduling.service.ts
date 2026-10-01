@@ -21,6 +21,7 @@ import type { RequestMeta } from '../common/request-meta.js';
 import type { Database } from '../database/database.types.js';
 import { TenantDb } from '../tenancy/tenant-db.js';
 import { computeSlotsForProviders, type Interval, type ProviderSchedule } from './availability.js';
+import { loadBusy } from './busy.js';
 import type {
   AvailabilityQuery,
   CreateAppointmentTypeDto,
@@ -34,6 +35,7 @@ import type {
 const FOREIGN_KEY_VIOLATION = '23503';
 const UNIQUE_VIOLATION = '23505';
 const DAY = 86_400_000;
+const MINUTE = 60_000;
 /** A stretch of time off may not be longer than this. */
 const TIME_OFF_MAX_DAYS = 366;
 /** Searches look at most this far at once, and by default this far ahead. */
@@ -100,7 +102,7 @@ export class SchedulingService {
     });
   }
 
-  private async loadSettings(trx: Trx, practiceId: string): Promise<SchedulingSettings> {
+  async loadSettings(trx: Trx, practiceId: string): Promise<SchedulingSettings> {
     const row = await trx.selectFrom('scheduling_settings').selectAll().where('practice_id', '=', practiceId).executeTakeFirst();
     if (!row) {
       return { ...SCHEDULING_DEFAULTS, updatedAt: null };
@@ -462,11 +464,13 @@ export class SchedulingService {
           ? []
           : await trx.selectFrom('provider_time_off').select(['provider_id', 'starts_at', 'ends_at']).where('provider_id', 'in', providerIds).where('active', '=', true).where('ends_at', '>', from).where('starts_at', '<', to).execute();
 
+      // A slot that starts before `to` can run past it, so look for taken times a whole visit beyond the end.
+      const busy = await loadBusy(trx, providerIds, from, new Date(to.getTime() + type.duration_minutes * MINUTE));
       const schedules: ProviderSchedule[] = providers.map((provider) => ({
         id: provider.id,
         hours: normalizeBusinessHours(provider.hours),
         timeOff: timeOffRows.filter((row) => row.provider_id === provider.id).map((row): Interval => ({ startsAt: row.starts_at, endsAt: row.ends_at })),
-        busy: [], // appointments arrive with the next step of the scheduling plan
+        busy: busy.get(provider.id) ?? [],
       }));
       const slots = computeSlotsForProviders(schedules, {
         timeZone: practice.timezone,

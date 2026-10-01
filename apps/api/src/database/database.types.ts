@@ -1,6 +1,7 @@
 import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
 import type {
   AfterHoursAction,
+  AppointmentStatus,
   AuditActorType,
   BusinessHours,
   ConversationChannel,
@@ -248,6 +249,40 @@ export interface ProviderTimeOffTable {
   created_at: Generated<Date>;
 }
 
+export interface PatientsTable {
+  id: Generated<string>;
+  practice_id: string;
+  first_name: string;
+  last_name: string;
+  /** A `date`: always select it as text (date_of_birth::text), or the driver turns it into a JS Date in the server's time zone. */
+  date_of_birth: string;
+  phone: string;
+  created_by_type: 'user' | 'ai';
+  created_by: string | null;
+  created_at: Generated<Date>;
+}
+
+export interface AppointmentsTable {
+  id: Generated<string>;
+  practice_id: string;
+  patient_id: string;
+  provider_id: string;
+  appointment_type_id: string;
+  starts_at: Date;
+  ends_at: Date;
+  status: Generated<AppointmentStatus>;
+  booked_by_type: 'user' | 'ai';
+  booked_by: string | null;
+  rescheduled_from_id: string | null;
+  idempotency_key: string;
+  cancelled_at: Date | null;
+  cancelled_by_type: 'user' | 'ai' | null;
+  cancelled_by: string | null;
+  cancel_reason: Generated<string>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface ConversationTurnsTable {
   id: Generated<string>;
   practice_id: string;
@@ -293,6 +328,8 @@ export interface Database {
   appointment_types: AppointmentTypesTable;
   provider_appointment_types: ProviderAppointmentTypesTable;
   provider_time_off: ProviderTimeOffTable;
+  patients: PatientsTable;
+  appointments: AppointmentsTable;
   conversations: ConversationsTable;
   conversation_turns: ConversationTurnsTable;
   tool_invocations: ToolInvocationsTable;

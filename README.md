@@ -64,6 +64,9 @@ The API is served under `/api`. Check it: `GET /api/health/live` (process up) an
 | `GET /api/tasks`, `/api/tasks/:id` | `tasks:read` (owner, admin, staff) | The queue of callback and message requests (created by staff, and later by the AI receptionist) |
 | `POST /api/tasks`, `PATCH /api/tasks/:id` | `tasks:manage` (owner, admin, staff) | Create, assign, edit and complete tasks (never deleted, only cancelled) |
 | `GET /api/scheduling/settings`, `/api/providers`, `/api/appointment-types`, `/api/availability` | `schedule:read` (owner, admin, staff) | Booking rules, providers and their hours, visit types, and the open times a caller would be offered |
+| `GET /api/appointments`, `/api/appointments/:id` | `schedule:read` (owner, admin, staff) | The calendar |
+| `GET /api/patients`, `/api/patients/:id` | `patients:read` (owner, admin, staff) | Find patients by name or phone (audited) |
+| `POST /api/patients`, `POST /api/appointments`, `.../:id/cancel`, `.../:id/reschedule` | `schedule:manage` (owner, admin, staff) | Add patients; book, cancel and move appointments (the database refuses double booking; a repeated request books once) |
 | `PATCH /api/scheduling/settings`, `POST`/`PATCH /api/providers`, `/api/appointment-types`, provider time off | `schedule:configure` (owner, admin) | Set up scheduling (nothing is deleted; the AI cannot be allowed to book until a provider with hours offers a visit type) |
 | `POST /api/agent/test-conversations`, `.../:id/messages` | `ai:configure` (owner, admin) | Text test chat with the practice's AI receptionist (needs a configured language model: 503 until then) |
 | `GET /api/conversations`, `/api/conversations/:id` | `calls:read` (owner, admin, staff) | Review conversations and what the AI did; viewing a transcript is audited |

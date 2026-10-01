@@ -19,9 +19,9 @@ Status: implemented (milestone 1, step 5). Code: `apps/api/src/tenancy`, `member
 | `ai:configure` (change it, turn it on or off) | yes | yes | | |
 | `calls:read` (read conversations with the AI receptionist) | yes | yes | yes | |
 | `schedule:read` (see providers, appointment types, rules, availability, later the calendar) | yes | yes | yes | |
-| `schedule:manage` (book, cancel and move appointments; used from scheduling step 2) | yes | yes | yes | |
+| `schedule:manage` (add patients; book, cancel and move appointments) | yes | yes | yes | |
 | `schedule:configure` (providers, hours, days off, appointment types, booking rules) | yes | yes | | |
-| `patients:read` (find patients and see their contact details; used from scheduling step 2) | yes | yes | yes | |
+| `patients:read` (find patients and see their date of birth and phone) | yes | yes | yes | |
 
 Staff hold `tasks:manage` and `schedule:manage` on purpose: they answer the phones, work the callback queue and book appointments. Those are the only write permissions staff have; they cannot change how scheduling is set up.
 
@@ -80,6 +80,10 @@ The API's database role can update only `practices(name, timezone, phone)` and `
 | `POST /api/voice/incoming`, `POST /api/voice/action`, WebSocket `/api/voice/relay` (more in the next steps) | none: public, but every request must carry a valid Twilio signature (403 otherwise; 404 while voice is off) | Incoming calls from Twilio; answers with TwiML (XML). Not reachable with a user login and never acts for a signed-in user. The practice comes only from the dialed number |
 | `GET /api/scheduling/settings`, `/api/providers`, `/api/providers/:id`, `/api/providers/:id/time-off`, `/api/appointment-types`, `/api/availability` | `schedule:read` | Booking rules, providers with their hours, days off, visit types, and the open times a caller would be offered (see [scheduling.md](scheduling.md)) |
 | `PATCH /api/scheduling/settings`, `POST`/`PATCH /api/providers`, `POST /api/providers/:id/time-off`, `POST /api/provider-time-off/:id/cancel`, `POST`/`PATCH /api/appointment-types` | `schedule:configure` | Set up scheduling. Nothing is deleted (switched off or cancelled). AI booking cannot be switched on until a provider with hours offers an appointment type (409 lists what is missing). Audited by field names only |
+| `GET /api/patients?q&limit`, `GET /api/patients/:id` | `patients:read` | Find and open patients (name, date of birth, phone). Every search (by number shown) and every open is audited, never with the search text |
+| `POST /api/patients` | `schedule:manage` | Add a patient, or return the one who already matches on name, date of birth and phone |
+| `GET /api/appointments?from&to&providerId&patientId&status&limit`, `GET /api/appointments/:id` | `schedule:read` | The calendar (patient name only) |
+| `POST /api/appointments`, `POST /api/appointments/:id/cancel`, `POST /api/appointments/:id/reschedule` | `schedule:manage` | Book, cancel, move. Booking and moving need an `Idempotency-Key` header; the database refuses double booking; audited with identifiers only (see [scheduling.md](scheduling.md)) |
 | `GET /api/auth/me`, `POST /api/auth/switch-practice` | any active member | |
 
 ## Known limits and deferred work

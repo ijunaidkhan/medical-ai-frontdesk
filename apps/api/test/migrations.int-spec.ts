@@ -29,14 +29,14 @@ describe('migrations', () => {
   async function schedulingTableCount(): Promise<number> {
     const { rows } = await sql<{ n: string }>`
       select count(*)::text as n from pg_tables
-      where schemaname = 'public' and tablename in ('scheduling_settings','providers','appointment_types','provider_appointment_types','provider_time_off')`.execute(db);
+      where schemaname = 'public' and tablename in ('scheduling_settings','providers','appointment_types','provider_appointment_types','provider_time_off','patients','appointments')`.execute(db);
     return Number(rows[0]?.n);
   }
 
   it('can be fully reverted and reapplied', async () => {
     const migrator = createMigrator(db);
     expect(await tableCount()).toBe(5);
-    expect(await schedulingTableCount()).toBe(5);
+    expect(await schedulingTableCount()).toBe(7);
 
     const down = await migrator.migrateTo(NO_MIGRATIONS); // revert everything
     expect(down.error).toBeUndefined();
@@ -46,7 +46,7 @@ describe('migrations', () => {
     const up = await migrator.migrateToLatest();
     expect(up.error).toBeUndefined();
     expect(await tableCount()).toBe(5);
-    expect(await schedulingTableCount()).toBe(5);
+    expect(await schedulingTableCount()).toBe(7);
   });
 
   it('0009 switches off a practice whose AI is already on without a crisis message, and records it', async () => {

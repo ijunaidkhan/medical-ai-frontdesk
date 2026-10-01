@@ -134,3 +134,90 @@ export interface AvailabilityResponse {
   timezone: string;
   slots: AvailabilitySlot[];
 }
+
+// ------------------------------------------------------- patients and appointments
+
+export const PATIENT_NAME_MAX_LENGTH = 100;
+export const PATIENT_SEARCH_LIMIT_DEFAULT = 10;
+export const PATIENT_SEARCH_LIMIT_MAX = 25;
+/** A search needs at least this many characters, so it can never list the whole patient book. */
+export const PATIENT_SEARCH_MIN_LENGTH = 2;
+
+/** Only what scheduling needs: no clinical information. */
+export interface Patient {
+  id: string;
+  firstName: string;
+  lastName: string;
+  /** YYYY-MM-DD. */
+  dateOfBirth: string;
+  /** International format, for example +14155550123. */
+  phone: string;
+  createdAt: string;
+}
+
+export interface CreatePatientRequest {
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  phone: string;
+}
+
+/**
+ * A real calendar date in YYYY-MM-DD form, from 1900 up to tomorrow (a birth date cannot be in the future;
+ * one day of slack covers the practice being ahead of UTC).
+ */
+export function isValidBirthDate(value: string, now: Date = new Date()): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  if (year < 1900) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return false;
+  return date.getTime() <= now.getTime() + 86_400_000;
+}
+
+export const APPOINTMENT_STATUSES = ['booked', 'cancelled', 'completed', 'no_show'] as const;
+export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
+export const APPOINTMENT_CANCEL_REASON_MAX_LENGTH = 200;
+/** The most that one list of appointments covers. */
+export const APPOINTMENT_WINDOW_MAX_DAYS = 62;
+export const APPOINTMENT_LIST_DEFAULT_DAYS = 7;
+export const APPOINTMENT_LIST_LIMIT_DEFAULT = 200;
+export const APPOINTMENT_LIST_LIMIT_MAX = 500;
+/** Every booking carries one of these so that a retried request books once. */
+export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{8,100}$/;
+
+export interface Appointment {
+  id: string;
+  patient: { id: string; firstName: string; lastName: string };
+  providerId: string;
+  providerName: string;
+  appointmentTypeId: string;
+  appointmentTypeName: string;
+  startsAt: string;
+  endsAt: string;
+  status: AppointmentStatus;
+  /** Who made the booking: a member of staff or the AI receptionist. */
+  bookedBy: 'user' | 'ai';
+  cancelledAt: string | null;
+  cancelReason: string;
+  /** Set when this appointment replaced another one that was moved. */
+  rescheduledFromId: string | null;
+}
+
+export interface BookAppointmentRequest {
+  patientId: string;
+  providerId: string;
+  appointmentTypeId: string;
+  startsAt: string;
+}
+
+export interface RescheduleAppointmentRequest {
+  startsAt: string;
+  /** Another provider who offers the same visit; the same provider when left out. */
+  providerId?: string;
+}
+
+export interface CancelAppointmentRequest {
+  reason?: string;
+}
