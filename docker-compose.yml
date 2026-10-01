@@ -55,6 +55,8 @@ services:
       VOICE_PROVIDER: ${VOICE_PROVIDER:-none}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      VOICE_TTS_PROVIDER: ${VOICE_TTS_PROVIDER:-}
+      VOICE_STT_PROVIDER: ${VOICE_STT_PROVIDER:-}
       # Exactly one proxy (the web container's nginx) sits in front of the API.
       TRUST_PROXY_HOPS: "1"
       CORS_ORIGINS: http://localhost:8080

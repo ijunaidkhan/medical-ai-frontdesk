@@ -37,5 +37,7 @@ export function createLanguageModel(config: Pick<EnvironmentVariables, 'LLM_PROV
         }),
     },
   ],
+  // The phone channel uses the same language model and will run the same agent.
+  exports: [LANGUAGE_MODEL],
 })
 export class AgentModule {}

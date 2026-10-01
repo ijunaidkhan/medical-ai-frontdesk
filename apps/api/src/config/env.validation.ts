@@ -4,6 +4,8 @@ import { IsIn, IsInt, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min,
 export const NODE_ENVS = ['development', 'test', 'production'] as const;
 export const LLM_PROVIDERS = ['none', 'anthropic'] as const;
 export const VOICE_PROVIDERS = ['none', 'twilio'] as const;
+export const VOICE_TTS_PROVIDERS = ['Google', 'Amazon', 'ElevenLabs'] as const;
+export const VOICE_STT_PROVIDERS = ['Google', 'Deepgram'] as const;
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
 
 /**
@@ -114,6 +116,21 @@ export class EnvironmentVariables {
   @IsUrl({ protocols: ['http', 'https'], require_tld: false, require_protocol: true }, { message: 'PUBLIC_BASE_URL must be the public http(s) address of this API' })
   @Matches(/^[^?#]*$/, { message: 'PUBLIC_BASE_URL must not contain a query string or fragment' })
   PUBLIC_BASE_URL?: string;
+
+  /**
+   * Which engine speaks to callers, and which one listens, inside Twilio's ConversationRelay.
+   * Optional: when unset, Twilio's own defaults apply. Set them explicitly once you have
+   * confirmed which engines your agreements (for example Twilio's HIPAA addendum) cover.
+   */
+  @Transform(({ value }) => (value === '' ? undefined : value))
+  @IsOptional()
+  @IsIn(VOICE_TTS_PROVIDERS)
+  VOICE_TTS_PROVIDER?: (typeof VOICE_TTS_PROVIDERS)[number];
+
+  @Transform(({ value }) => (value === '' ? undefined : value))
+  @IsOptional()
+  @IsIn(VOICE_STT_PROVIDERS)
+  VOICE_STT_PROVIDER?: (typeof VOICE_STT_PROVIDERS)[number];
 
   @IsOptional()
   @Transform(({ value }) =>
