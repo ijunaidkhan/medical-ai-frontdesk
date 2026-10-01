@@ -34,6 +34,12 @@ export function errorMessage(error: unknown, fallback = 'Something went wrong. P
   if (status === 429) {
     return 'Too many requests. Please wait a minute and try again.';
   }
+  // Our own API sometimes says 503 on purpose and explains why (for example, "the AI model is not set up yet").
+  // That explanation is written for people, so it is shown as it is.
+  const ownMessage = (error as HttpErrorResponse).error as { message?: unknown } | string | null;
+  if (status === 503 && typeof ownMessage === 'object' && ownMessage !== null && typeof ownMessage.message === 'string' && ownMessage.message.length > 0) {
+    return ownMessage.message;
+  }
   // A gateway in front of the API answered instead of the API: it is down or restarting.
   if (status === 502 || status === 503 || status === 504) {
     return 'The service is not responding right now. Please try again in a moment.';

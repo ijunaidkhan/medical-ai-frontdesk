@@ -2,7 +2,7 @@ import { plainToInstance, Transform } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min, MinLength, validateSync, ValidateIf } from 'class-validator';
 
 export const NODE_ENVS = ['development', 'test', 'production'] as const;
-export const LLM_PROVIDERS = ['none', 'anthropic'] as const;
+export const LLM_PROVIDERS = ['none', 'anthropic', 'ollama'] as const;
 export const VOICE_PROVIDERS = ['none', 'twilio'] as const;
 export const VOICE_TTS_PROVIDERS = ['Google', 'Amazon', 'ElevenLabs'] as const;
 export const VOICE_STT_PROVIDERS = ['Google', 'Deepgram'] as const;
@@ -85,6 +85,27 @@ export class EnvironmentVariables {
   @IsString()
   @Matches(/^[A-Za-z0-9._-]{1,100}$/, { message: 'ANTHROPIC_MODEL must be a model id such as claude-sonnet-5-5' })
   ANTHROPIC_MODEL: string = 'claude-sonnet-5-5';
+
+  /**
+   * Ollama, a free program that runs language models on your own computer (used when
+   * LLM_PROVIDER=ollama). Nothing leaves the machine and no key is needed. The model must
+   * support tools, e.g. llama3.1:8b, llama3.2:3b or qwen2.5:7b (install with: ollama pull <name>).
+   */
+  @Transform(({ value }) => (value === undefined || value === '' ? 'http://localhost:11434' : typeof value === 'string' ? value.replace(/\/+$/, '') : value))
+  @IsUrl({ protocols: ['http', 'https'], require_tld: false, require_protocol: true }, { message: 'OLLAMA_BASE_URL must be an http(s) address such as http://localhost:11434' })
+  OLLAMA_BASE_URL: string = 'http://localhost:11434';
+
+  @Transform(({ value }) => (value === undefined || value === '' ? 'llama3.1:8b' : value))
+  @IsString()
+  @Matches(/^[A-Za-z0-9._:/-]{1,100}$/, { message: 'OLLAMA_MODEL must be a model name such as llama3.1:8b' })
+  OLLAMA_MODEL: string = 'llama3.1:8b';
+
+  /** A model on a laptop is slow, especially for the first reply (it has to load). */
+  @Transform(({ value }) => (value === undefined || value === '' ? 90 : Number(value)))
+  @IsInt()
+  @Min(5)
+  @Max(600)
+  OLLAMA_TIMEOUT_SECONDS: number = 90;
 
   /**
    * Whether the API answers phone calls. "none" (the default) keeps every /api/voice

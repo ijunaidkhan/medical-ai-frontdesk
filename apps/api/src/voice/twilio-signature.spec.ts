@@ -153,9 +153,19 @@ describe('Twilio signature', () => {
       expect(urlSpellings('https://a.example:8443/x')).toEqual(['https://a.example:8443/x']);
     });
 
-    it('offers nothing for an address that is not http(s)', () => {
+    it('treats WebSocket addresses the same way (wss is https, ws is http)', () => {
+      expect(urlSpellings('wss://a.example/relay?token=t')).toEqual(['wss://a.example/relay?token=t', 'wss://a.example:443/relay?token=t']);
+      expect(urlSpellings('ws://a.example/relay')).toEqual(['ws://a.example/relay', 'ws://a.example:80/relay']);
+      expect(urlSpellings('wss://a.example:8443/relay')).toEqual(['wss://a.example:8443/relay']);
+      const signature = expectedTwilioSignature(TOKEN, 'wss://a.example:443/relay?token=t', {});
+      expect(isValidTwilioSignature(TOKEN, signature, 'wss://a.example/relay?token=t', {})).toBe(true);
+      expect(isValidTwilioSignature(TOKEN, signature, 'wss://a.example/relay?token=other', {})).toBe(false);
+    });
+
+    it('offers nothing for an address that is not http(s) or ws(s)', () => {
       expect(urlSpellings('nonsense')).toEqual([]);
       expect(urlSpellings('file:///etc/passwd')).toEqual([]);
+      expect(urlSpellings('ftp://a.example/x')).toEqual([]);
     });
   });
 });

@@ -33,14 +33,15 @@ export function urlSpellings(url: string): string[] {
   } catch {
     return [];
   }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return [];
+  const secure = parsed.protocol === 'https:' || parsed.protocol === 'wss:';
+  if (!secure && parsed.protocol !== 'http:' && parsed.protocol !== 'ws:') return [];
   const rest = `${parsed.pathname}${parsed.search}${parsed.hash}`;
   const credentials = parsed.username ? `${parsed.username}${parsed.password ? `:${parsed.password}` : ''}@` : '';
   if (parsed.port !== '') {
     // A port that is not the default is part of the address and must match as written.
     return [`${parsed.protocol}//${credentials}${parsed.host}${rest}`];
   }
-  const standard = parsed.protocol === 'https:' ? ':443' : ':80';
+  const standard = secure ? ':443' : ':80';
   return [`${parsed.protocol}//${credentials}${parsed.host}${rest}`, `${parsed.protocol}//${credentials}${parsed.host}${standard}${rest}`];
 }
 

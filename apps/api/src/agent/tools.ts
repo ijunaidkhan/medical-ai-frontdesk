@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { isOpenAt, type AiConfiguration, type TransferTarget } from '@frontdesk/shared';
+import { describeBusinessHours, isOpenAt, type AiConfiguration, type TransferTarget } from '@frontdesk/shared';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import type { Transaction } from 'kysely';
@@ -11,6 +11,7 @@ import { TasksService } from '../tasks/tasks.service.js';
 import type { ModelToolDefinition } from './model/language-model.js';
 import type { AgentMode } from './prompt.js';
 import { stripControl } from './sanitize.js';
+import { callerIsFinished } from './farewell.js';
 import { chooseTransferTarget } from './safety/escalation.js';
 
 /** A conversation may create at most this many tasks through the receptionist's tool (escalation tasks are separate). */
@@ -43,6 +44,8 @@ export interface ToolRuntime {
   state: TurnState;
   /** Tasks the tool has already created in this conversation (before this turn). */
   tasksBefore: number;
+  /** What the caller said in this turn. Used by rules the backend enforces itself, such as "only end when they say goodbye". */
+  callerText: string;
 }
 
 export type ToolResult = { status: 'ok' | 'rejected'; result: Record<string, unknown> };
@@ -76,7 +79,7 @@ const TOOL_DEFINITIONS: Record<string, ModelToolDefinition> = {
         contactName: { type: 'string' },
         contactPhone: { type: 'string', description: 'International format, for example +14155550123.' },
       },
-      required: ['type', 'title'],
+      required: ['type', 'title', 'contactPhone'],
       additionalProperties: false,
     },
   },
@@ -140,6 +143,13 @@ export class AgentTools {
       case 'request_human_handoff':
         return this.handoff(runtime);
       case 'end_conversation':
+        // The backend decides: only a caller who has said they are finished can end it, however sure the model is.
+        if (!callerIsFinished(runtime.callerText)) {
+          return {
+            status: 'rejected',
+            result: { error: 'The caller has not said they are finished, so the conversation cannot end yet. Answer what they said, or ask if there is anything else you can help with.' },
+          };
+        }
         runtime.state.ended = true;
         return { status: 'ok', result: { ended: true } };
       default:
@@ -168,6 +178,8 @@ export class AgentTools {
         phone: practice.phone,
         timezone: practice.timezone,
         openNow: isOpenAt(config.businessHours, practice.timezone, new Date()),
+        // Ready to read out as it is: models (small ones especially) do better with a sentence than with data.
+        hoursText: describeBusinessHours(config.businessHours),
         hours: config.businessHours,
         afterHours: config.afterHoursAction === 'transfer' ? 'calls are passed to a person' : 'the AI receptionist takes a message',
       },
@@ -178,6 +190,13 @@ export class AgentTools {
     const created = runtime.tasksBefore + runtime.state.createdTaskIds.length;
     if (created >= MAX_TASKS_PER_CONVERSATION) {
       return { status: 'rejected', result: { error: 'The limit for messages in one conversation has been reached. Tell the caller the team already has their details.' } };
+    }
+    // A message nobody can answer is useless: the team needs a number to call back. Enforced here, whatever the model decides.
+    if (!pickString(args, 'contactPhone')) {
+      return {
+        status: 'rejected',
+        result: { error: 'A phone number is needed so the team can call the caller back. Ask the caller for their name and a phone number (with the country code) first, then try again.' },
+      };
     }
     // Only these fields are read; the priority is always normal (urgent tasks come from the safety layer, never from the model).
     const dto = plainToInstance(CreateTaskDto, {

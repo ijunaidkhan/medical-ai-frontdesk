@@ -38,9 +38,25 @@ const MODEL_TIMEOUT_MS = 20_000;
 /** How much of the conversation the model is shown. */
 const HISTORY_TURNS = 40;
 
+/** Said to the model (never to the caller) when its reply was code or a tool request written out as text. */
+export const TOOL_SYNTAX_NOTICE =
+  'NOTICE FROM THE SYSTEM, NOT FROM THE CALLER: your last reply could not be used because it contained code or a tool request written out as text. If you need a tool, use the tool mechanism. Otherwise reply again with only plain words for the caller.';
+
 export const LIMIT_REPLY = 'I am sorry, this conversation has reached its length limit. Please contact the practice directly if you still need help.';
 
 type Executor = Transaction<Database>;
+
+/**
+ * Who a conversation is run for. The practice is always known; a signed-in staff
+ * member is present only in the text test chat. A phone call has no user at all.
+ */
+export interface Caller {
+  practiceId: string;
+  userId?: string;
+}
+
+/** The ways a conversation can reach the receptionist. */
+export type AgentChannel = 'test_chat' | 'phone';
 
 interface ConversationState {
   status: ConversationStatus;
@@ -130,8 +146,21 @@ export class AgentService {
 
   // ---------------------------------------------------------------- message
 
-  async sendMessage(auth: AuthContext, conversationId: string, text: string, meta: RequestMeta): Promise<AgentReply> {
-    const turn = await this.receive(auth, conversationId, text, meta);
+  /** One message in the staff test chat. */
+  sendMessage(auth: AuthContext, conversationId: string, text: string, meta: RequestMeta): Promise<AgentReply> {
+    return this.converse(auth, 'test_chat', conversationId, text, meta);
+  }
+
+  /**
+   * What a caller said on the phone (already turned into text). The practice and the
+   * conversation come from the stored call; there is no signed-in user.
+   */
+  answerCall(practiceId: string, conversationId: string, text: string, meta: RequestMeta): Promise<AgentReply> {
+    return this.converse({ practiceId }, 'phone', conversationId, text, meta);
+  }
+
+  private async converse(auth: Caller, channel: AgentChannel, conversationId: string, text: string, meta: RequestMeta): Promise<AgentReply> {
+    const turn = await this.receive(auth, channel, conversationId, text, meta);
     const { context, conversation } = turn;
 
     const isOpen = isOpenAt(context.config.businessHours, context.practice.timezone, new Date());
@@ -150,17 +179,18 @@ export class AgentService {
     //    emergency phrase gets the practice's emergency message added to whatever the model says.
     const mode: AgentMode = conversation.escalation === null ? 'normal' : 'message_only';
     const repeatedNotice = plan.kind === 'none' ? '' : plan.notice;
-    return this.answerWithModel(auth, turn, mode, repeatedNotice);
+    return this.answerWithModel(auth, channel, turn, mode, repeatedNotice);
   }
 
   // -------------------------------------------------------- step 1: receive
 
   /** Records the caller's message and gathers what the next steps need. Short transaction, no model call. */
-  private receive(auth: AuthContext, conversationId: string, text: string, meta: RequestMeta): Promise<IncomingTurn> {
+  private receive(auth: Caller, channel: AgentChannel, conversationId: string, text: string, meta: RequestMeta): Promise<IncomingTurn> {
     const startedAt = Date.now();
     return this.inPractice(auth.practiceId, auth.userId, async (trx) => {
       const row = await trx.selectFrom('conversations').selectAll().where('id', '=', conversationId).forUpdate().executeTakeFirst();
-      if (!row || row.channel !== 'test_chat') {
+      // A phone conversation can only be continued by the phone channel and a test chat only by the test chat.
+      if (!row || row.channel !== channel) {
         throw new NotFoundException('Conversation not found');
       }
       if (row.status !== 'active') {
@@ -215,7 +245,7 @@ export class AgentService {
 
   // ------------------------------------------------ path 1: fixed safety script
 
-  private escalate(auth: AuthContext, turn: IncomingTurn, plan: Exclude<EscalationPlan, { kind: 'none' }>): Promise<AgentReply> {
+  private escalate(auth: Caller, turn: IncomingTurn, plan: Exclude<EscalationPlan, { kind: 'none' }>): Promise<AgentReply> {
     const { conversationId, meta } = turn;
     return this.inPractice(auth.practiceId, auth.userId, async (trx) => {
       const row = await this.lockActive(trx, conversationId);
@@ -259,7 +289,7 @@ export class AgentService {
     });
   }
 
-  private endForLimit(auth: AuthContext, turn: IncomingTurn): Promise<AgentReply> {
+  private endForLimit(auth: Caller, turn: IncomingTurn): Promise<AgentReply> {
     const { conversationId, context } = turn;
     const emergencyMessage = context.config.emergencyMessage.trim();
     const reply = emergencyMessage ? `${LIMIT_REPLY} ${SAFETY_NET} ${emergencyMessage}` : LIMIT_REPLY;
@@ -277,24 +307,24 @@ export class AgentService {
 
   // ----------------------------------------------------- path 2: the model
 
-  private async answerWithModel(auth: AuthContext, turn: IncomingTurn, mode: AgentMode, fixedSuffix: string): Promise<AgentReply> {
+  private async answerWithModel(auth: Caller, channel: AgentChannel, turn: IncomingTurn, mode: AgentMode, fixedSuffix: string): Promise<AgentReply> {
     const { conversationId, context, meta } = turn;
     const state: TurnState = { ended: false, handoffTargetId: null, createdTaskIds: [] };
-    const runtime: ToolRuntime = { practiceId: auth.practiceId, conversationId, context, meta, state, tasksBefore: turn.tasksBefore };
+    const runtime: ToolRuntime = { practiceId: auth.practiceId, conversationId, context, meta, state, tasksBefore: turn.tasksBefore, callerText: turn.text };
     const isOpen = isOpenAt(context.config.businessHours, context.practice.timezone, new Date());
-    const system = buildSystemPrompt({ practiceName: context.practice.name, isOpen, mode });
+    const system = buildSystemPrompt({ practiceName: context.practice.name, isOpen, mode, channel });
     const messages: ModelMessage[] = [...turn.history, { role: 'user', text: turn.text }];
 
     let draft = '';
     let failure: string | null = null;
-    try {
-      let toolCalls = 0;
+    let toolCalls = 0;
+    /** Lets the model use tools for up to a few rounds and returns what it finally says. */
+    const runRounds = async (): Promise<string> => {
       for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
         // On the last round no tools are offered, so the model has to answer in words.
         const response = await this.ask({ system, messages, tools: round === MAX_TOOL_ROUNDS ? [] : this.tools.definitions(mode) });
         if (response.toolCalls.length === 0) {
-          draft = response.text;
-          break;
+          return response.text;
         }
         messages.push({ role: 'assistant', text: response.text, toolCalls: response.toolCalls });
         for (const call of response.toolCalls) {
@@ -308,6 +338,18 @@ export class AgentService {
           }
           messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(outcome.result) });
         }
+      }
+      return '';
+    };
+    try {
+      draft = await runRounds();
+      // A model that writes tool syntax or code instead of words has made a formatting mistake, not an unsafe one:
+      // it gets ONE more chance, told what was wrong, before the caller is given the fixed safe line. Every other
+      // kind of blocked reply (an invented diagnosis, a false booking claim...) is never retried.
+      const first = checkReply(stripControl(draft).trim());
+      if (!first.ok && first.reason === 'tool_syntax') {
+        messages.push({ role: 'assistant', text: draft }, { role: 'user', text: TOOL_SYNTAX_NOTICE });
+        draft = await runRounds();
       }
     } catch (error) {
       failure = error instanceof ModelUnavailableError ? 'model_unavailable' : 'model_error';
@@ -336,11 +378,13 @@ export class AgentService {
     }
     const source: TurnSource = replaced ? 'scripted_guard' : 'model';
     const guardReason = verdict.ok ? null : verdict.reason;
+    // What the model wrote is kept for reviewers when the safety check replaced it (not when the model simply failed).
+    const blockedText = !verdict.ok && failure === null && cleaned !== '' ? cleaned.slice(0, 4_000) : null;
 
     return this.inPractice(auth.practiceId, auth.userId, async (trx) => {
       const row = await this.lockActive(trx, conversationId);
       const escalation = row.escalation;
-      await this.appendAiTurn(trx, auth.practiceId, conversationId, source, reply, guardReason, Date.now() - turn.startedAt);
+      await this.appendAiTurn(trx, auth.practiceId, conversationId, source, reply, guardReason, Date.now() - turn.startedAt, blockedText);
 
       let changes: Parameters<typeof this.updateConversation>[2] = {};
       if (state.handoffTargetId !== null) {
@@ -383,7 +427,7 @@ export class AgentService {
    * the turn state is restored, and the failure is recorded separately.
    */
   private async runTool(
-    auth: AuthContext,
+    auth: Caller,
     runtime: ToolRuntime,
     turnSeq: number,
     name: string,
@@ -439,7 +483,7 @@ export class AgentService {
 
   /** The same, in its own transaction (for refusals and failures, which have no transaction of their own). */
   private recordInvocationAlone(
-    auth: AuthContext,
+    auth: Caller,
     conversationId: string,
     turnSeq: number,
     tool: string,
@@ -457,7 +501,7 @@ export class AgentService {
 
   private async ask(request: ModelRequest): Promise<ModelResponse> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), this.model.timeoutMs ?? MODEL_TIMEOUT_MS);
     try {
       return await Promise.race([
         this.model.complete(request, controller.signal),
@@ -522,10 +566,21 @@ export class AgentService {
     text: string,
     guardReason: string | null,
     latencyMs: number | null,
+    blockedText: string | null = null,
   ) {
     return trx
       .insertInto('conversation_turns')
-      .values({ practice_id: practiceId, conversation_id: conversationId, seq, speaker, source, text, guard_reason: guardReason, latency_ms: latencyMs })
+      .values({
+        practice_id: practiceId,
+        conversation_id: conversationId,
+        seq,
+        speaker,
+        source,
+        text,
+        guard_reason: guardReason,
+        blocked_text: blockedText,
+        latency_ms: latencyMs,
+      })
       .execute();
   }
 
@@ -538,6 +593,7 @@ export class AgentService {
     text: string,
     guardReason: string | null,
     latencyMs: number,
+    blockedText: string | null = null,
   ): Promise<number> {
     const last = await trx
       .selectFrom('conversation_turns')
@@ -545,7 +601,7 @@ export class AgentService {
       .where('conversation_id', '=', conversationId)
       .executeTakeFirstOrThrow();
     const seq = (last.seq ?? 0) + 1;
-    await this.insertTurn(trx, practiceId, conversationId, seq, 'ai', source, text, guardReason, latencyMs);
+    await this.insertTurn(trx, practiceId, conversationId, seq, 'ai', source, text, guardReason, latencyMs, blockedText);
     return seq;
   }
 

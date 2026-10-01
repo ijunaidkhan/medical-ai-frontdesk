@@ -92,11 +92,23 @@ describe('TestChatPage', () => {
       expect(button('Start a test chat')).toBeDefined(); // can try again after fixing it
     });
 
-    it('says plainly when no AI model is configured (503)', async () => {
+    it('says plainly when no AI model is configured (503), not "the service is not responding"', async () => {
       await setup();
       button('Start a test chat')!.click();
       await render(fixture);
-      startRequest().flush({ message: 'The AI model is not set up yet.' }, { status: 503, statusText: 'Service Unavailable' });
+      startRequest().flush(
+        { message: 'The AI model is not set up yet. Ask the system administrator to configure it.' },
+        { status: 503, statusText: 'Service Unavailable' },
+      );
+      await render(fixture);
+      expect(alerts()[0]).toBe('The AI model is not set up yet. Ask the system administrator to configure it.');
+    });
+
+    it('a real outage (a gateway error with no explanation) still says the service is not responding', async () => {
+      await setup();
+      button('Start a test chat')!.click();
+      await render(fixture);
+      startRequest().flush('<html>Bad gateway</html>', { status: 502, statusText: 'Bad Gateway' });
       await render(fixture);
       expect(alerts()[0]).toBe('The service is not responding right now. Please try again in a moment.');
     });

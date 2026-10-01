@@ -118,6 +118,31 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('Ollama (a free model on your own computer)', () => {
+    it('has working defaults and needs no key', () => {
+      const env = validateEnv({ ...REQUIRED, LLM_PROVIDER: 'ollama' });
+      expect(env).toMatchObject({ LLM_PROVIDER: 'ollama', OLLAMA_BASE_URL: 'http://localhost:11434', OLLAMA_MODEL: 'llama3.1:8b', OLLAMA_TIMEOUT_SECONDS: 90 });
+    });
+
+    it('accepts a chosen address, model and timeout, and drops a trailing slash', () => {
+      const env = validateEnv({ ...REQUIRED, LLM_PROVIDER: 'ollama', OLLAMA_BASE_URL: 'http://192.168.1.20:11434/', OLLAMA_MODEL: 'qwen2.5:7b', OLLAMA_TIMEOUT_SECONDS: '120' });
+      expect(env).toMatchObject({ OLLAMA_BASE_URL: 'http://192.168.1.20:11434', OLLAMA_MODEL: 'qwen2.5:7b', OLLAMA_TIMEOUT_SECONDS: 120 });
+    });
+
+    it('treats blank values (an unedited .env) as the defaults', () => {
+      expect(validateEnv({ ...REQUIRED, OLLAMA_BASE_URL: '', OLLAMA_MODEL: '', OLLAMA_TIMEOUT_SECONDS: '' })).toMatchObject({ OLLAMA_MODEL: 'llama3.1:8b', OLLAMA_TIMEOUT_SECONDS: 90 });
+    });
+
+    it.each([
+      ['an address that is not a URL', { OLLAMA_BASE_URL: 'localhost' }, /OLLAMA_BASE_URL/],
+      ['a model name with odd characters', { OLLAMA_MODEL: 'llama; rm -rf /' }, /OLLAMA_MODEL/],
+      ['a timeout that is too short', { OLLAMA_TIMEOUT_SECONDS: '1' }, /OLLAMA_TIMEOUT_SECONDS/],
+      ['a timeout that is not a number', { OLLAMA_TIMEOUT_SECONDS: 'soon' }, /OLLAMA_TIMEOUT_SECONDS/],
+    ])('refuses %s', (_name, change, message) => {
+      expect(() => validateEnv({ ...REQUIRED, LLM_PROVIDER: 'ollama', ...change })).toThrow(message);
+    });
+  });
+
   describe('phone calls', () => {
     const TOKEN = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
     const VOICE = { VOICE_PROVIDER: 'twilio', TWILIO_AUTH_TOKEN: TOKEN, PUBLIC_BASE_URL: 'https://calls.example.org' };

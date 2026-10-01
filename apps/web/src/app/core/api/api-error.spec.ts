@@ -20,6 +20,26 @@ describe('errorMessage', () => {
     expect(errorMessage(failure(status))).toBe('The service is not responding right now. Please try again in a moment.');
   });
 
+  it('shows our own API’s explanation of a 503 (for example, the AI model is not set up), instead of a vague message', () => {
+    expect(errorMessage(failure(503, { statusCode: 503, message: 'The AI model is not set up yet.' }))).toBe('The AI model is not set up yet.');
+  });
+
+  it.each([
+    ['a gateway page (text)', '<html>Service Unavailable</html>'],
+    ['an empty body', null],
+    ['a body with no message', { statusCode: 503 }],
+    ['an empty message', { message: '' }],
+    ['a message that is not text', { message: { nested: true } }],
+  ])('still says "not responding" for a 503 with %s', (_name, body) => {
+    expect(errorMessage(failure(503, body))).toBe('The service is not responding right now. Please try again in a moment.');
+  });
+
+  it('only a 503 may explain itself: a 502 or 504 with a message is still a gateway problem, and 500 never repeats details', () => {
+    expect(errorMessage(failure(502, { message: 'upstream said something' }))).toBe('The service is not responding right now. Please try again in a moment.');
+    expect(errorMessage(failure(504, { message: 'timeout detail' }))).toBe('The service is not responding right now. Please try again in a moment.');
+    expect(errorMessage(failure(500, { message: 'internal detail' }))).toBe('Something went wrong. Please try again.');
+  });
+
   it('explains rate limiting', () => {
     expect(errorMessage(failure(429))).toMatch(/Too many requests/);
   });

@@ -2,6 +2,7 @@ import {
   AI_DISCLOSURE,
   aiReadinessProblems,
   composeGreeting,
+  describeBusinessHours,
   emptyBusinessHours,
   hasAnyOpeningHours,
   isOpenAt,
@@ -127,6 +128,59 @@ describe('isOpenAt (on the practice’s own clock)', () => {
   it('reads the local weekday and minutes correctly', () => {
     expect(localTime(new Date('2026-09-28T13:05:00Z'), 'America/New_York')).toEqual({ weekday: 'mon', minutes: 9 * 60 + 5 });
     expect(localTime(new Date('2026-09-28T00:00:00Z'), 'UTC')).toEqual({ weekday: 'mon', minutes: 0 }); // midnight is 00:00, never "24:00"
+  });
+});
+
+describe('describeBusinessHours (the hours as sentences a caller can be told)', () => {
+  const week = (days: Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', Array<{ open: string; close: string }>>>): BusinessHours => ({ ...emptyBusinessHours(), ...days });
+  const nineToFive = [{ open: '09:00', close: '17:00' }];
+
+  it('a typical week: weekdays grouped, weekend closed', () => {
+    expect(describeBusinessHours(weekdays('09:00', '17:00'))).toBe('Monday to Friday: 9 AM to 5 PM. Saturday and Sunday: closed.');
+  });
+
+  it('a short Saturday gets its own sentence', () => {
+    expect(describeBusinessHours({ ...weekdays('09:00', '17:00'), sat: [{ open: '09:00', close: '13:00' }] })).toBe(
+      'Monday to Friday: 9 AM to 5 PM. Saturday: 9 AM to 1 PM. Sunday: closed.',
+    );
+  });
+
+  it('every day the same, and open round the clock', () => {
+    const every = { mon: nineToFive, tue: nineToFive, wed: nineToFive, thu: nineToFive, fri: nineToFive, sat: nineToFive, sun: nineToFive };
+    expect(describeBusinessHours(week(every))).toBe('Every day: 9 AM to 5 PM.');
+    const allDay = [{ open: '00:00', close: '24:00' }];
+    expect(describeBusinessHours(week({ mon: allDay, tue: allDay, wed: allDay, thu: allDay, fri: allDay, sat: allDay, sun: allDay }))).toBe('Every day: open 24 hours.');
+  });
+
+  it('a split day, and the words noon and midnight', () => {
+    expect(describeBusinessHours(week({ mon: [{ open: '09:00', close: '12:00' }, { open: '13:00', close: '17:00' }] }))).toBe(
+      'Monday: 9 AM to noon and 1 PM to 5 PM. Tuesday to Sunday: closed.',
+    );
+    expect(describeBusinessHours(week({ fri: [{ open: '18:00', close: '24:00' }] }))).toContain('Friday: 6 PM to midnight.');
+  });
+
+  it.each([
+    ['08:05', '8:05 AM'],
+    ['12:30', '12:30 PM'],
+    ['17:30', '5:30 PM'],
+    ['22:00', '10 PM'],
+    ['00:30', '12:30 AM'],
+  ])('writes %s as %s', (time, spoken) => {
+    expect(describeBusinessHours(week({ mon: [{ open: time, close: '23:59' }] }))).toContain(`Monday: ${spoken} to `);
+  });
+
+  it('days that are not next to each other but share hours are listed together', () => {
+    expect(describeBusinessHours(week({ mon: nineToFive, wed: nineToFive }))).toBe(
+      'Monday and Wednesday: 9 AM to 5 PM. Tuesday, Thursday, Friday, Saturday and Sunday: closed.',
+    );
+  });
+
+  it('three neighbouring days are a range', () => {
+    expect(describeBusinessHours(week({ mon: nineToFive, tue: nineToFive, wed: nineToFive }))).toBe('Monday to Wednesday: 9 AM to 5 PM. Thursday to Sunday: closed.');
+  });
+
+  it('says so when no hours are set, instead of describing a week of "closed"', () => {
+    expect(describeBusinessHours(emptyBusinessHours())).toBe('The practice has not set its opening hours.');
   });
 });
 

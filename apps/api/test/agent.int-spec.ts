@@ -160,6 +160,8 @@ describe('the AI receptionist (text test chat)', () => {
       // The tenant is never part of what the model sees or chooses.
       expect(JSON.stringify(model.requests)).not.toContain(alpha.practiceId);
       expect(model.requests[1]!.messages.at(-1)).toMatchObject({ role: 'tool', name: 'get_practice_info' });
+      // The hours come as a sentence ready to be said, not only as data.
+      expect(JSON.stringify(model.requests[1]!.messages.at(-1))).toContain('Every day: open 24 hours.');
 
       const d = await detail(conversationId);
       expect(d.turns.map((turn) => [turn.seq, turn.speaker, turn.source])).toEqual([[1, 'ai', 'greeting'], [2, 'caller', 'caller'], [3, 'ai', 'model']]);
@@ -233,9 +235,23 @@ describe('the AI receptionist (text test chat)', () => {
       expect(JSON.stringify(model.requests[1]!.messages.at(-1))).toContain('international format');
     });
 
+    it('refuses to save a message with no phone number, and tells the model to ask for one (nobody could call back)', async () => {
+      const { conversationId } = await start();
+      script(
+        callTool('create_staff_task', { type: 'other', title: 'Appointment Booking', details: 'Needs an appointment booking', contactName: '', contactPhone: '' }),
+        say('May I have your name and a phone number so the team can call you back?'),
+      );
+      const reply = await send(conversationId, 'i need an appointment booking');
+      expect(reply.createdTaskIds).toEqual([]);
+      expect(await tasksOf(conversationId)).toHaveLength(0);
+      expect((await detail(conversationId)).toolCalls).toMatchObject([{ tool: 'create_staff_task', status: 'rejected' }]);
+      expect(JSON.stringify(model.requests[1]!.messages.at(-1))).toContain('A phone number is needed');
+      expect(reply.reply).toContain('phone number');
+    });
+
     it('allows at most three tasks per conversation and refuses calls beyond the per-turn limit', async () => {
       const { conversationId } = await start();
-      const task = (n: number) => ({ id: `t${n}`, name: 'create_staff_task', arguments: { type: 'message', title: `Message ${n}` } });
+      const task = (n: number) => ({ id: `t${n}`, name: 'create_staff_task', arguments: { type: 'message', title: `Message ${n}`, contactPhone: '+14155550123' } });
       script({ text: '', toolCalls: [task(1), task(2), task(3), task(4), { id: 'extra', name: 'get_practice_info', arguments: {} }] }, say('The team has your details.'));
       const reply = await send(conversationId, 'leave four messages please');
       expect(reply.createdTaskIds).toHaveLength(3);
@@ -251,9 +267,21 @@ describe('the AI receptionist (text test chat)', () => {
       expect((await detail(conversationId)).toolCalls).toMatchObject([{ tool: 'delete_all_patients', status: 'rejected' }]);
     });
 
+    it('never ends a conversation just because the model asks to: the caller must have said they are finished', async () => {
+      const { conversationId } = await start();
+      script(callTool('end_conversation', {}), say('Goodbye.')); // a confused model hangs up on "what is your name?"
+      const reply = await send(conversationId, 'what is your name?');
+      expect(reply).toMatchObject({ status: 'active', outcome: null, source: 'model' });
+      expect((await detail(conversationId)).toolCalls).toMatchObject([{ tool: 'end_conversation', status: 'rejected' }]);
+      expect(JSON.stringify(model.requests[1]!.messages.at(-1))).toContain('has not said they are finished');
+      // The conversation is still open, and ends properly when the caller does say goodbye.
+      script(callTool('end_conversation', {}), say('Goodbye, take care.'));
+      expect(await send(conversationId, 'ok thanks, bye')).toMatchObject({ status: 'completed', outcome: 'answered' });
+    });
+
     it('ends the conversation when the model asks to, with the right outcome', async () => {
       const { conversationId } = await start();
-      script(callTool('create_staff_task', { type: 'message', title: 'Leave a message' }), callTool('end_conversation', {}), say('Goodbye.'));
+      script(callTool('create_staff_task', { type: 'message', title: 'Leave a message', contactPhone: '+14155550123' }), callTool('end_conversation', {}), say('Goodbye.'));
       const reply = await send(conversationId, 'Just tell them I called. Bye.');
       expect(reply).toMatchObject({ status: 'completed', outcome: 'message_taken' });
       const d = await detail(conversationId);
@@ -291,7 +319,59 @@ describe('the AI receptionist (text test chat)', () => {
       expect(reply).toMatchObject({ reply: SAFE_FALLBACK_REPLY, source: 'scripted_guard' });
       const d = await detail(conversationId);
       expect(d.turns.at(-1)).toMatchObject({ source: 'scripted_guard', text: SAFE_FALLBACK_REPLY, guardReason: reason });
-      expect(JSON.stringify(d)).not.toContain(unsafe || 'never-matches-empty');
+      // What the caller heard never contains it; reviewers can still see what the model wrote (the empty reply has nothing to show).
+      expect(d.turns.at(-1)!.text).not.toContain(unsafe || 'never-matches-empty');
+      expect(d.turns.at(-1)!.blockedText).toBe(unsafe === '' ? null : unsafe);
+      expect(d.turns.slice(0, -1).every((turn) => turn.blockedText === null)).toBe(true);
+    });
+
+    it('a blocked reply is never retried (only a formatting mistake is), and what the model wrote is kept for reviewers', async () => {
+      const { conversationId } = await start();
+      script(say('You probably have an infection.'), say('this second answer must never be asked for'));
+      const reply = await send(conversationId, 'what is wrong with me');
+      expect(reply).toMatchObject({ reply: SAFE_FALLBACK_REPLY, source: 'scripted_guard' });
+      expect(model.requests).toHaveLength(1);
+      queue.length = 0;
+    });
+
+    it('a model that writes tool syntax or code instead of words gets ONE more chance, told what was wrong', async () => {
+      const { conversationId } = await start();
+      const garbled = '{"name":"create_staff_task","parameters{"type":"string","title":"x"}}';
+      script(say(garbled), say('You will receive an email with the details of your appointment.'));
+      const reply = await send(conversationId, 'how will i get my confirmation of appointment');
+      expect(reply).toMatchObject({ reply: 'You will receive an email with the details of your appointment.', source: 'model' });
+      expect(model.requests).toHaveLength(2);
+      const retry = model.requests[1]!.messages.slice(-2);
+      expect(retry[0]).toMatchObject({ role: 'assistant', text: garbled });
+      expect(retry[1]).toMatchObject({ role: 'user' });
+      expect(JSON.stringify(retry[1])).toContain('NOTICE FROM THE SYSTEM, NOT FROM THE CALLER');
+      const d = await detail(conversationId);
+      expect(d.turns.at(-1)).toMatchObject({ source: 'model', guardReason: null, blockedText: null }); // the caller only ever saw the good answer
+      expect(JSON.stringify(d.turns)).not.toContain('NOTICE FROM THE SYSTEM'); // the notice is for the model only
+    });
+
+    it('if the second try is also code, the caller gets the safe line, and the last bad attempt is kept for reviewers', async () => {
+      const { conversationId } = await start();
+      script(say('{"name":"x","parameters{'), say('```json\n{"still":"code"}\n```'));
+      const reply = await send(conversationId, 'hello');
+      expect(reply).toMatchObject({ reply: SAFE_FALLBACK_REPLY, source: 'scripted_guard' });
+      expect(model.requests).toHaveLength(2); // one retry, never more
+      expect((await detail(conversationId)).turns.at(-1)).toMatchObject({ guardReason: 'tool_syntax', blockedText: '```json\n{"still":"code"}\n```' });
+    });
+
+    it('if the retry itself fails, the failure is what is recorded: the earlier bad attempt is not presented as a blocked reply', async () => {
+      const { conversationId } = await start();
+      script(say('{"name":"x","parameters{'), new Error('vendor said 500'));
+      const reply = await send(conversationId, 'hello');
+      expect(reply).toMatchObject({ reply: SAFE_FALLBACK_REPLY, source: 'scripted_guard' });
+      expect((await detail(conversationId)).turns.at(-1)).toMatchObject({ guardReason: 'model_error', blockedText: null });
+    });
+
+    it('a model that fails (not a blocked reply) leaves nothing to keep', async () => {
+      const { conversationId } = await start();
+      script(new Error('vendor said 500'));
+      await send(conversationId, 'hello');
+      expect((await detail(conversationId)).turns.at(-1)).toMatchObject({ guardReason: 'model_error', blockedText: null });
     });
 
     it.each([

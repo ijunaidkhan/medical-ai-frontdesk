@@ -1,7 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { aiReadinessProblems, composeGreeting, PHONE_PATTERN } from '@frontdesk/shared';
+import { aiReadinessProblems, composeGreeting, PHONE_PATTERN, type AgentReply } from '@frontdesk/shared';
+import { sql } from 'kysely';
 import { PinoLogger } from 'nestjs-pino';
+import { AgentService } from '../agent/agent.service.js';
 import { writeAuditLog } from '../audit/audit-log.js';
 import type { EnvironmentVariables } from '../config/env.validation.js';
 import { AiService } from '../ai/ai.service.js';
@@ -52,10 +54,62 @@ export class VoiceService {
     private readonly config: ConfigService<EnvironmentVariables, true>,
     private readonly numbers: PhoneNumbersService,
     private readonly ai: AiService,
+    private readonly agent: AgentService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(VoiceService.name);
     this.relayTokens = new RelayTokenService(this.config.get('ACCESS_TOKEN_SECRET', { infer: true }));
+  }
+
+  /** What a caller said, answered by the same receptionist as the text chat. The practice and conversation come from the stored call. */
+  answerCaller(practiceId: string, conversationId: string, text: string): Promise<AgentReply> {
+    return this.agent.answerCall(practiceId, conversationId, text, { ip: null, userAgent: null, requestId: null });
+  }
+
+  /**
+   * Closes out a phone conversation when its session is over: records how long it
+   * lasted and, if nobody had ended it, that the caller hung up ("abandoned"; or the
+   * emergency / message-taken outcome it had already earned). Safe to run twice.
+   */
+  async endCall(practiceId: string, conversationId: string): Promise<void> {
+    await withPracticeContext(this.db, { practiceId }, async (trx) => {
+      const row = await trx.selectFrom('conversations').selectAll().where('id', '=', conversationId).forUpdate().executeTakeFirst();
+      if (!row || row.channel !== 'phone') {
+        return;
+      }
+      const seconds = Math.max(0, Math.round((Date.now() - row.started_at.getTime()) / 1000));
+      if (row.status !== 'active') {
+        if (row.duration_seconds === null) {
+          await trx.updateTable('conversations').set({ duration_seconds: seconds }).where('id', '=', conversationId).execute();
+        }
+        return;
+      }
+      const tasks = await trx
+        .selectFrom('staff_tasks')
+        .select((eb) => eb.fn.countAll<string>().as('total'))
+        .where('conversation_id', '=', conversationId)
+        .where('created_by_type', '=', 'ai')
+        .where('priority', '=', 'normal')
+        .executeTakeFirstOrThrow();
+      const outcome = row.escalation === 'emergency' ? 'emergency' : Number(tasks.total) > 0 ? 'message_taken' : 'abandoned';
+      await trx
+        .updateTable('conversations')
+        .set({ status: 'completed', outcome, ended_at: sql<Date>`now()`, duration_seconds: seconds })
+        .where('id', '=', conversationId)
+        .execute();
+    });
+  }
+
+  /** Is this conversation a live phone call of this practice that can still be talked to? Returns the Twilio call id when it is. */
+  async liveCallSid(practiceId: string, conversationId: string): Promise<string | null> {
+    return withPracticeContext(this.db, { practiceId }, async (trx) => {
+      const row = await trx
+        .selectFrom('conversations')
+        .select(['provider_call_sid', 'status', 'channel'])
+        .where('id', '=', conversationId)
+        .executeTakeFirst();
+      return row && row.channel === 'phone' && row.status === 'active' ? row.provider_call_sid : null;
+    });
   }
 
   /** The TwiML answer for an incoming call. Never throws: any failure becomes a spoken message. */

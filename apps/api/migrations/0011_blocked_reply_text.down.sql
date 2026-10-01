@@ -1,0 +1,2 @@
+ALTER TABLE conversation_turns DROP CONSTRAINT conversation_turns_blocked_text_needs_reason;
+ALTER TABLE conversation_turns DROP COLUMN blocked_text;

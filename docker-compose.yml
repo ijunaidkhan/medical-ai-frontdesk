@@ -51,6 +51,11 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-none}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      # A free model on your own computer. Ollama runs on the host, not in a container,
+      # so the API reaches it through Docker's host address.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-90}
       # Phone calls. Off unless VOICE_PROVIDER=twilio with a token and public address set in .env.
       VOICE_PROVIDER: ${VOICE_PROVIDER:-none}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}

@@ -26,6 +26,16 @@ export default defineConfig({
       // Lets tests pose as different client IPs (X-Forwarded-For) so that per-IP
       // rate limits do not couple unrelated tests.
       TRUST_PROXY_HOPS: '1',
+      // The test setup reads the developer's .env for the database address, which would also leak their
+      // personal AI model and phone settings into the tests. These are pinned to "off" so a test run behaves
+      // the same on every machine; a test that needs one of them sets it for itself.
+      LLM_PROVIDER: 'none',
+      ANTHROPIC_API_KEY: '',
+      VOICE_PROVIDER: 'none',
+      TWILIO_AUTH_TOKEN: '',
+      PUBLIC_BASE_URL: '',
+      VOICE_TTS_PROVIDER: '',
+      VOICE_STT_PROVIDER: '',
     },
   },
 });

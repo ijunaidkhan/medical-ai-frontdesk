@@ -47,7 +47,7 @@ export class ConversationsService {
         throw new NotFoundException('Conversation not found');
       }
       const [turns, calls, target] = await Promise.all([
-        trx.selectFrom('conversation_turns').select(['seq', 'speaker', 'source', 'text', 'guard_reason', 'latency_ms', 'created_at']).where('conversation_id', '=', id).orderBy('seq').execute(),
+        trx.selectFrom('conversation_turns').select(['seq', 'speaker', 'source', 'text', 'guard_reason', 'blocked_text', 'latency_ms', 'created_at']).where('conversation_id', '=', id).orderBy('seq').execute(),
         trx
           .selectFrom('tool_invocations')
           .select(['turn_seq', 'tool_name', 'arguments', 'result', 'status', 'duration_ms', 'created_at'])
@@ -80,6 +80,7 @@ export class ConversationsService {
             source: turn.source,
             text: turn.text,
             guardReason: turn.guard_reason,
+            blockedText: turn.blocked_text,
             latencyMs: turn.latency_ms,
             at: turn.created_at.toISOString(),
           }),

@@ -16,6 +16,12 @@ export default defineConfig({
       DATABASE_URL: 'postgres://frontdesk_app:placeholder@127.0.0.1:1/unused',
       // Test-only key. Not a real secret.
       ACCESS_TOKEN_SECRET: 'e2e-tests-only-signing-key-0123456789abcdef',
+      // Never inherit a developer's personal AI model or phone settings.
+      LLM_PROVIDER: 'none',
+      ANTHROPIC_API_KEY: '',
+      VOICE_PROVIDER: 'none',
+      TWILIO_AUTH_TOKEN: '',
+      PUBLIC_BASE_URL: '',
     },
   },
 });

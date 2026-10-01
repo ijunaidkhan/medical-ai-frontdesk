@@ -50,6 +50,8 @@ export interface ConversationTurn {
   text: string;
   /** Why a reply was replaced by a safe one, when it was. */
   guardReason: string | null;
+  /** What the AI model wrote before the safety check replaced it (for reviewers only; the caller never sees it). */
+  blockedText: string | null;
   latencyMs: number | null;
   at: string;
 }

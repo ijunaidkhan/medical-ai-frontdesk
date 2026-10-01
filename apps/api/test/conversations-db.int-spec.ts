@@ -26,6 +26,7 @@ describe('conversation tables (database rules)', () => {
     source: 'caller' as const,
     text,
     guard_reason: null,
+    blocked_text: null,
     latency_ms: null,
   });
 
@@ -124,6 +125,33 @@ describe('conversation tables (database rules)', () => {
       ['text over 4000 characters', 'x'.repeat(4001)],
     ])('refuses a turn with %s', async (_label, text) => {
       await expect(owner.insertInto('conversation_turns').values(turn(alpha.practiceId, alphaConversation, 50, text)).execute()).rejects.toThrow(/check constraint/);
+    });
+
+    describe('the text of a reply the safety check replaced', () => {
+      const blocked = (extra: object) => ({ ...turn(alpha.practiceId, alphaConversation, 60), speaker: 'ai' as const, source: 'scripted_guard' as const, guard_reason: 'diagnosis', blocked_text: 'You probably have an infection.', ...extra });
+
+      it('is kept with the turn it replaced, and the API role can add it but never edit or erase it', async () => {
+        await inAlpha((trx) => trx.insertInto('conversation_turns').values(blocked({ seq: 61 })).execute());
+        const [row] = await owner.selectFrom('conversation_turns').select(['guard_reason', 'blocked_text']).where('seq', '=', 61).where('conversation_id', '=', alphaConversation).execute();
+        expect(row).toEqual({ guard_reason: 'diagnosis', blocked_text: 'You probably have an infection.' });
+        await expect(inAlpha((trx) => trx.updateTable('conversation_turns').set({ blocked_text: null }).execute())).rejects.toThrow(/permission denied/);
+      });
+
+      it('is tenant-isolated like the rest of the transcript', async () => {
+        const seen = await inAlpha((trx) => trx.selectFrom('conversation_turns').select(['blocked_text']).where('blocked_text', 'is not', null).execute());
+        expect(seen.every((turnRow) => turnRow.blocked_text === 'You probably have an infection.')).toBe(true);
+        await expect(
+          inAlpha((trx) => trx.insertInto('conversation_turns').values({ ...blocked({ seq: 62 }), practice_id: beta.practiceId, conversation_id: betaConversation }).execute()),
+        ).rejects.toThrow(/row-level security/);
+      });
+
+      it.each([
+        ['without a guard reason (only a replaced turn has one)', { guard_reason: null }],
+        ['empty', { blocked_text: '' }],
+        ['over 4000 characters', { blocked_text: 'x'.repeat(4001) }],
+      ])('is refused when %s', async (_label, change) => {
+        await expect(owner.insertInto('conversation_turns').values(blocked({ seq: 63, ...change })).execute()).rejects.toThrow(/check constraint/);
+      });
     });
 
     it('keeps "active" and "finished" consistent: an active conversation has no end or outcome; a finished one has both', async () => {

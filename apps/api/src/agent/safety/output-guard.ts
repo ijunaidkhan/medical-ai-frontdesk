@@ -9,7 +9,8 @@ export type GuardReason =
   | 'false_reassurance'
   | 'booking_claim'
   | 'human_claim'
-  | 'prompt_leak';
+  | 'prompt_leak'
+  | 'tool_syntax';
 
 export type GuardVerdict = { ok: true } | { ok: false; reason: GuardReason };
 
@@ -33,6 +34,18 @@ const MEDICINES =
  * miss. Tested with both blocked and allowed examples.
  */
 const RULES: Array<{ reason: GuardReason; test: (lowercase: string, normalised: string) => boolean }> = [
+  {
+    // A model that writes its tool request, or code, as the reply instead of using the tool mechanism.
+    // Callers would hear it read aloud ("curly bracket name colon create staff task..."). Replies are plain sentences.
+    reason: 'tool_syntax',
+    test: (lowercase) =>
+      /^\s*[[{]/.test(lowercase) ||
+      /"(name|function|tool|tool_name|parameters|arguments|args)"\s*:/.test(lowercase) ||
+      /"(name|function|tool|tool_name|parameters|arguments|args)\s*[[{]/.test(lowercase) ||
+      /<\/?\s*(tool_call|tool_calls|function_call|function|tool_use)\b/.test(lowercase) ||
+      /\[\s*tool_calls?\s*\]/.test(lowercase) ||
+      /```/.test(lowercase),
+  },
   {
     // Amounts of a medicine, however written: "500 mg", "2 tablets", "0.5ml".
     reason: 'medication_advice',

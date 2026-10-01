@@ -43,6 +43,8 @@ export interface LanguageModel {
   readonly name: string;
   /** False when no model is set up: conversations cannot start, but fixed safety scripts still work. */
   readonly configured: boolean;
+  /** How long one reply may take before the caller gets the fixed safe line. Defaults to 20 seconds; a model running on a laptop needs longer. */
+  readonly timeoutMs?: number;
   complete(request: ModelRequest, signal?: AbortSignal): Promise<ModelResponse>;
 }
 

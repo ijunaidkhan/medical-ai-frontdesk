@@ -135,6 +135,61 @@ export function isOpenAt(hours: BusinessHours, timeZone: string, instant: Date):
   return hours[weekday].some(({ open, close }) => minutes >= toMinutes(open) && minutes < toMinutes(close));
 }
 
+const DAY_NAMES: Readonly<Record<Weekday, string>> = {
+  mon: 'Monday',
+  tue: 'Tuesday',
+  wed: 'Wednesday',
+  thu: 'Thursday',
+  fri: 'Friday',
+  sat: 'Saturday',
+  sun: 'Sunday',
+};
+
+/** "09:00" -> "9 AM", "17:30" -> "5:30 PM", "12:00" -> "noon", "00:00" and "24:00" -> "midnight". */
+function speakableTime(value: string): string {
+  const minutes = toMinutes(value);
+  if (minutes === 0 || minutes === 24 * 60) return 'midnight';
+  if (minutes === 12 * 60) return 'noon';
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  return `${twelve}${minute === 0 ? '' : `:${String(minute).padStart(2, '0')}`} ${hour < 12 ? 'AM' : 'PM'}`;
+}
+
+function describeDay(intervals: TimeInterval[]): string {
+  if (intervals.length === 0) return 'closed';
+  if (intervals.length === 1 && toMinutes(intervals[0]!.open) === 0 && toMinutes(intervals[0]!.close) === 24 * 60) return 'open 24 hours';
+  return intervals.map(({ open, close }) => `${speakableTime(open)} to ${speakableTime(close)}`).join(' and ');
+}
+
+function joinDays(days: Weekday[]): string {
+  const names = days.map((day) => DAY_NAMES[day]);
+  if (names.length === 7) return 'Every day';
+  if (names.length >= 3 && days.every((day, i) => i === 0 || WEEKDAYS.indexOf(day) === WEEKDAYS.indexOf(days[i - 1]!) + 1)) return `${names[0]} to ${names.at(-1)}`;
+  return names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
+/**
+ * The opening hours as plain sentences a person (or a phone call) can say:
+ * "Monday to Friday: 9 AM to 5 PM. Saturday and Sunday: closed." Days with the same
+ * hours are grouped. Call only with hours that passed validation.
+ */
+export function describeBusinessHours(hours: BusinessHours): string {
+  if (!hasAnyOpeningHours(hours)) return 'The practice has not set its opening hours.';
+  const groups: Array<{ days: Weekday[]; text: string }> = [];
+  for (const day of WEEKDAYS) {
+    const text = describeDay(hours[day]);
+    const last = groups.at(-1);
+    if (last && last.text === text) last.days.push(day);
+    else groups.push({ days: [day], text });
+  }
+  // Non-neighbouring days with the same hours are listed together ("Monday and Wednesday: ...").
+  const merged = new Map<string, Weekday[]>();
+  for (const group of groups) merged.set(group.text, [...(merged.get(group.text) ?? []), ...group.days]);
+  const ordered = [...merged.entries()].sort((a, b) => WEEKDAYS.indexOf(a[1][0]!) - WEEKDAYS.indexOf(b[1][0]!));
+  return ordered.map(([text, days]) => `${joinDays(days)}: ${text}.`).join(' ');
+}
+
 // ----------------------------------------------------- settings and targets
 
 export interface TransferTarget {

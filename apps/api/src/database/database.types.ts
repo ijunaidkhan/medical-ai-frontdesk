@@ -206,6 +206,8 @@ export interface ConversationTurnsTable {
   source: TurnSource;
   text: string;
   guard_reason: string | null;
+  /** What the model wrote when the safety check replaced it. Never shown to the caller. */
+  blocked_text: string | null;
   latency_ms: number | null;
   created_at: Generated<Date>;
 }
