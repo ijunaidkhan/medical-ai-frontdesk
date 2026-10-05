@@ -15,6 +15,7 @@ import type {
   KnowledgeStatus,
   Role,
   TaskPriority,
+  TimeFormat,
   TaskStatus,
   TaskType,
   TransferPurpose,
@@ -179,6 +180,9 @@ export interface ConversationsTable {
   caller_number: string | null;
   phone_number_id: string | null;
   duration_seconds: number | null;
+  /** Who the caller has been verified as (all four details matched), and how many identity checks have failed (3 locks it). */
+  verified_patient_id: string | null;
+  identity_failures: Generated<number>;
   turn_count: Generated<number>;
   started_at: Generated<Date>;
   ended_at: Date | null;
@@ -205,6 +209,8 @@ export interface SchedulingSettingsTable {
   max_advance_days: Generated<number>;
   cancel_min_hours: Generated<number>;
   ai_booking_enabled: Generated<boolean>;
+  time_format: Generated<TimeFormat>;
+  identity_failure_cap_per_hour: Generated<number>;
   updated_by: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
@@ -275,6 +281,8 @@ export interface AppointmentsTable {
   booked_by: string | null;
   rescheduled_from_id: string | null;
   idempotency_key: string;
+  /** The conversation (call or test chat) that made the booking, when the AI receptionist did. */
+  conversation_id: string | null;
   cancelled_at: Date | null;
   cancelled_by_type: 'user' | 'ai' | null;
   cancelled_by: string | null;

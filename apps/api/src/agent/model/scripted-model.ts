@@ -14,16 +14,20 @@ export class ScriptedModel implements LanguageModel {
   readonly requests: ModelRequest[] = [];
   private position = 0;
 
-  constructor(private readonly steps: ScriptedStep[] | ((request: ModelRequest, index: number) => ScriptedStep)) {}
+  /** A function may return its step directly or as a promise, so a test can do something while the model is "thinking". */
+  constructor(private readonly steps: ScriptedStep[] | ((request: ModelRequest, index: number) => ScriptedStep | Promise<ScriptedStep>)) {}
 
-  complete(request: ModelRequest): Promise<ModelResponse> {
+  async complete(request: ModelRequest): Promise<ModelResponse> {
     this.requests.push(structuredClone(request));
-    const step = typeof this.steps === 'function' ? this.steps(request, this.position) : this.steps[this.position];
+    const step = typeof this.steps === 'function' ? await this.steps(request, this.position) : this.steps[this.position];
     this.position += 1;
     if (step === undefined) {
-      return Promise.reject(new Error('ScriptedModel ran out of scripted steps'));
+      throw new Error('ScriptedModel ran out of scripted steps');
     }
-    return step instanceof Error ? Promise.reject(step) : Promise.resolve(step);
+    if (step instanceof Error) {
+      throw step;
+    }
+    return step;
   }
 }
 

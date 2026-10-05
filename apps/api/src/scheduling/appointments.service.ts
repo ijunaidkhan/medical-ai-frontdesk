@@ -54,6 +54,8 @@ export interface BookInput {
   startsAt: Date;
   /** Booking again with the same key returns the same appointment instead of making another. */
   idempotencyKey: string;
+  /** The conversation that made the booking (the AI receptionist's), kept on the appointment for review. */
+  conversationId?: string | null;
 }
 
 export interface RescheduleInput {
@@ -61,6 +63,7 @@ export interface RescheduleInput {
   /** Another provider who offers the same visit; the same provider when left out. */
   providerId?: string;
   idempotencyKey: string;
+  conversationId?: string | null;
 }
 
 interface AppointmentRow {
@@ -272,7 +275,14 @@ export class AppointmentsService {
       trx,
       practiceId,
       actor,
-      { patientId: current.patient_id, providerId, appointmentTypeId: current.appointment_type_id, startsAt: input.startsAt, idempotencyKey: input.idempotencyKey },
+      {
+        patientId: current.patient_id,
+        providerId,
+        appointmentTypeId: current.appointment_type_id,
+        startsAt: input.startsAt,
+        idempotencyKey: input.idempotencyKey,
+        conversationId: input.conversationId ?? null,
+      },
       meta,
       mode,
       id,
@@ -302,6 +312,7 @@ export class AppointmentsService {
         booked_by: actor.kind === 'user' ? actor.userId : null,
         rescheduled_from_id: replacesId,
         idempotency_key: input.idempotencyKey,
+        conversation_id: input.conversationId ?? null,
         cancelled_at: null,
         cancelled_by_type: null,
         cancelled_by: null,

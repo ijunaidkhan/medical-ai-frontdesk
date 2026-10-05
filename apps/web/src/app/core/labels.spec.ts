@@ -31,6 +31,8 @@ describe('auditLabel', () => {
     ['appointment.booked', 'Appointment booked'],
     ['appointment.cancelled', 'Appointment cancelled'],
     ['appointment.rescheduled', 'Appointment moved'],
+    ['patient.verified', 'Caller identified by the AI receptionist'],
+    ['conversation.identity_locked', 'Caller identification locked after failed matches'],
     ['scheduling.settings_updated', 'Booking rules changed'],
     ['scheduling.ai_booking_enabled', 'AI receptionist allowed to book appointments'],
     ['scheduling.ai_booking_disabled', 'AI receptionist no longer allowed to book appointments'],

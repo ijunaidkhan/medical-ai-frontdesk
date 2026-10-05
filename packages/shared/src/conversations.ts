@@ -19,7 +19,7 @@ export const TURN_SPEAKERS = ['caller', 'ai', 'system'] as const;
 export type TurnSpeaker = (typeof TURN_SPEAKERS)[number];
 
 /** How a line was produced. Fixed safety scripts are marked so reviewers can tell them from the model's own words. */
-export const TURN_SOURCES = ['caller', 'greeting', 'model', 'scripted_emergency', 'scripted_urgent', 'scripted_guard', 'scripted_limit', 'system'] as const;
+export const TURN_SOURCES = ['caller', 'greeting', 'model', 'scripted_emergency', 'scripted_urgent', 'scripted_guard', 'scripted_limit', 'scripted_booking', 'system'] as const;
 export type TurnSource = (typeof TURN_SOURCES)[number];
 
 export const TOOL_STATUSES = ['ok', 'error', 'rejected'] as const;

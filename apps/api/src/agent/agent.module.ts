@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AiModule } from '../ai/ai.module.js';
 import type { EnvironmentVariables } from '../config/env.validation.js';
 import { KnowledgeModule } from '../knowledge/knowledge.module.js';
+import { SchedulingModule } from '../scheduling/scheduling.module.js';
 import { TasksModule } from '../tasks/tasks.module.js';
 import { AgentController, ConversationsController } from './agent.controller.js';
 import { AgentService } from './agent.service.js';
@@ -10,6 +11,7 @@ import { ConversationsService } from './conversations.service.js';
 import { AnthropicModel } from './model/anthropic-model.js';
 import { LANGUAGE_MODEL, UnconfiguredModel, type LanguageModel } from './model/language-model.js';
 import { OllamaModel } from './model/ollama-model.js';
+import { SchedulingTools } from './scheduling-tools.js';
 import { AgentTools } from './tools.js';
 
 /** Chooses the language model from configuration. Without a configured provider there is no model: conversations cannot start (503). */
@@ -31,12 +33,13 @@ export function createLanguageModel(
 }
 
 @Module({
-  imports: [AiModule, KnowledgeModule, TasksModule],
+  imports: [AiModule, KnowledgeModule, TasksModule, SchedulingModule],
   controllers: [AgentController, ConversationsController],
   providers: [
     AgentService,
     ConversationsService,
     AgentTools,
+    SchedulingTools,
     {
       provide: LANGUAGE_MODEL,
       inject: [ConfigService],

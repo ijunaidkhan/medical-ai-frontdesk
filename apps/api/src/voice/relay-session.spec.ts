@@ -109,6 +109,7 @@ describe('RelaySession', () => {
       ['scripted_emergency', false],
       ['scripted_urgent', false],
       ['scripted_limit', false],
+      ['scripted_booking', false],
       ['scripted_guard', true],
       ['model', true],
     ] as const)('a %s reply is interruptible: %s (fixed safety messages are always heard in full)', async (source, interruptible) => {

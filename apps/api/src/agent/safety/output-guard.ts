@@ -85,11 +85,20 @@ const RULES: Array<{ reason: GuardReason; test: (lowercase: string, normalised: 
       /\b(nothing to worry about|no need to worry about (it|that|your (symptoms?|pain|condition))|its nothing serious|its probably nothing|it is nothing serious|not serious|nothing serious|youll be fine|you will be fine|you are going to be fine|youre going to be fine|completely normal|perfectly normal|totally normal)\b/.test(normalised),
   },
   {
-    // The receptionist cannot book yet; any claim of an arranged appointment would be false.
+    // Only the backend may say an appointment is arranged, changed or listed, and it does so in its own
+    // sentences, which skip this check (see appointment-text.ts). Any such claim in the MODEL's words is
+    // therefore false or unverified, whatever the visit is called: the model cannot know it happened.
     reason: 'booking_claim',
     test: (_l, normalised) =>
       // ("i've" is "ive" once apostrophes are removed, so the contracted forms are listed too.)
-      /\b((i|ive|i have|i just|ive just|i already|ive already) (booked|scheduled|confirmed|cancel+ed|rescheduled|arranged|reserved|moved) (your|the|an|a) (appointment|visit|booking|slot|consultation)|your (appointment|visit|booking|slot|consultation) (is|has been|was|will be) (now )?(booked|scheduled|confirmed|cancel+ed|rescheduled|arranged|reserved|set)|youre (all )?(booked|scheduled|confirmed)|you are (all )?(booked|scheduled|confirmed)|(i|ive|i have) (booked|scheduled) you)\b/.test(normalised),
+      /\b((i|ive|i have|i just|ive just|i already|ive already) (booked|scheduled|confirmed|cancel+ed|rescheduled|arranged|reserved|moved) (your|the|an|a) (appointment|visit|booking|slot|consultation)|your (appointment|visit|booking|slot|consultation) (is|has been|was|will be) (now )?(booked|scheduled|confirmed|cancel+ed|rescheduled|arranged|reserved|set)|youre (all )?(booked|scheduled|confirmed)|you are (all )?(booked|scheduled|confirmed)|(i|ive|i have) (booked|scheduled) you)\b/.test(normalised) ||
+      // The same claim with the visit's own name in it ("your follow-up with Dr Khan is booked for Tuesday").
+      /\b(is|are|has been|have been|was|will be) (now |all |already |successfully )?(booked|scheduled|confirmed|cancel+ed|rescheduled|reserved|moved) (for|on|to|at|with)\b/.test(normalised) ||
+      /\b(has|have) been (now |successfully )?(cancel+ed|rescheduled)\b/.test(normalised) ||
+      /\b(i|ive|i have|i just|ive just|i already|ive already) (booked|scheduled|confirmed|cancel+ed|rescheduled|arranged|reserved|moved) (you|that|this|it|them)\b/.test(normalised) ||
+      // Telling the caller what they have booked, which only the backend can know.
+      /\b(you have|youve got|you have got) (an? )?(appointment|visit|booking) (on|at|for) (monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|\d)/.test(normalised) ||
+      /\b(you have|youve got|you have got) (an?|one|\d+|two|three|four|five) upcoming (appointments?|visits?|bookings?)\b/.test(normalised),
   },
   {
     reason: 'human_claim',

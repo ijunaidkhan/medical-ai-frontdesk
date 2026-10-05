@@ -35,7 +35,7 @@ export interface SessionHooks {
 type EndReason = 'completed' | 'handed_off' | 'error';
 
 /** Reasons a reply must not be talked over: the fixed safety messages. */
-const NOT_INTERRUPTIBLE = new Set<AgentReply['source']>(['scripted_emergency', 'scripted_urgent', 'scripted_limit']);
+const NOT_INTERRUPTIBLE = new Set<AgentReply['source']>(['scripted_emergency', 'scripted_urgent', 'scripted_limit', 'scripted_booking']);
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 

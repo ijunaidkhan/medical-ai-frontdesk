@@ -448,6 +448,7 @@ describe('patients and appointments', () => {
       it('refuses a weekend (no hours) and a time in the past', async () => {
         await attempt(at(5, '09:00')).expect(409);
         await attempt(new Date(Date.now() - DAY).toISOString()).expect(409);
+        await attempt(at(-28, '09:00')).expect(409); // a Monday four weeks back at 09:00: inside the hours and on the grid, but over
         await attempt(new Date(Date.now() - 5 * 60_000).toISOString()).expect(409);
       });
 
@@ -977,6 +978,9 @@ describe('patients and appointments', () => {
       ['a status that does not exist', { status: 'maybe' }],
       ['"cancelled" without a cancellation time', { status: 'cancelled' }],
       ['a cancellation time on a booked appointment', { cancelled_at: new Date(), cancelled_by_type: 'ai' }],
+      ['a cancellation that names nobody who cancelled it', { status: 'cancelled', cancelled_at: new Date() }],
+      ['a cancellation by staff that names no person', { status: 'cancelled', cancelled_at: new Date(), cancelled_by_type: 'user', cancelled_by: null }],
+      ['a cancelling person without a cancellation', { cancelled_by_type: 'ai' }],
       ['an AI booking that names a person', { booked_by_type: 'ai', booked_by: SOME_UUID }],
       ['a staff booking that names no one', { booked_by_type: 'user', booked_by: null }],
       ['a key that is too short', { idempotency_key: 'short' }],

@@ -61,9 +61,9 @@ export class SchedulingService {
       await trx.selectFrom('scheduling_settings').select('practice_id').where('practice_id', '=', auth.practiceId).forUpdate().executeTakeFirst();
       const current = await this.loadSettings(trx, auth.practiceId);
 
-      const changes = {} as Record<string, number | boolean>;
+      const changes = {} as Record<string, number | boolean | string>;
       const fields: string[] = [];
-      const note = <K extends 'slotMinutes' | 'minNoticeHours' | 'maxAdvanceDays' | 'cancelMinHours' | 'aiBookingEnabled'>(key: K, column: string) => {
+      const note = <K extends 'slotMinutes' | 'minNoticeHours' | 'maxAdvanceDays' | 'cancelMinHours' | 'aiBookingEnabled' | 'timeFormat' | 'identityFailureCapPerHour'>(key: K, column: string) => {
         const value = dto[key];
         if (value !== undefined && value !== current[key]) {
           changes[column] = value;
@@ -75,6 +75,8 @@ export class SchedulingService {
       note('maxAdvanceDays', 'max_advance_days');
       note('cancelMinHours', 'cancel_min_hours');
       note('aiBookingEnabled', 'ai_booking_enabled');
+      note('timeFormat', 'time_format');
+      note('identityFailureCapPerHour', 'identity_failure_cap_per_hour');
       if (fields.length === 0) {
         throw new BadRequestException('Nothing to change');
       }
@@ -113,6 +115,8 @@ export class SchedulingService {
       maxAdvanceDays: row.max_advance_days,
       cancelMinHours: row.cancel_min_hours,
       aiBookingEnabled: row.ai_booking_enabled,
+      timeFormat: row.time_format,
+      identityFailureCapPerHour: row.identity_failure_cap_per_hour,
       updatedAt: row.updated_at.toISOString(),
     };
   }
@@ -437,62 +441,83 @@ export class SchedulingService {
       throw new BadRequestException(`Search at most ${AVAILABILITY_WINDOW_MAX_DAYS} days at a time`);
     }
 
-    return this.tenant.run(auth, async (trx) => {
-      const practice = await trx.selectFrom('practices').select('timezone').where('id', '=', auth.practiceId).executeTakeFirstOrThrow();
-      const type = await trx.selectFrom('appointment_types').selectAll().where('id', '=', query.appointmentTypeId).where('active', '=', true).executeTakeFirst();
-      if (!type) {
-        throw new NotFoundException('Appointment type not found');
-      }
-      let providersQuery = trx
-        .selectFrom('providers as p')
-        .innerJoin('provider_appointment_types as link', 'link.provider_id', 'p.id')
-        .select(['p.id', 'p.name', 'p.hours'])
-        .where('link.appointment_type_id', '=', type.id)
-        .where('p.active', '=', true)
-        .orderBy('p.name')
-        .orderBy('p.id');
-      if (query.providerId) providersQuery = providersQuery.where('p.id', '=', query.providerId);
-      const providers = await providersQuery.execute();
-      if (query.providerId && providers.length === 0) {
-        throw new NotFoundException('That provider does not offer this appointment type');
-      }
-
-      const settings = await this.loadSettings(trx, auth.practiceId);
-      const providerIds = providers.map((provider) => provider.id);
-      const timeOffRows =
-        providerIds.length === 0
-          ? []
-          : await trx.selectFrom('provider_time_off').select(['provider_id', 'starts_at', 'ends_at']).where('provider_id', 'in', providerIds).where('active', '=', true).where('ends_at', '>', from).where('starts_at', '<', to).execute();
-
-      // A slot that starts before `to` can run past it, so look for taken times a whole visit beyond the end.
-      const busy = await loadBusy(trx, providerIds, from, new Date(to.getTime() + type.duration_minutes * MINUTE));
-      const schedules: ProviderSchedule[] = providers.map((provider) => ({
-        id: provider.id,
-        hours: normalizeBusinessHours(provider.hours),
-        timeOff: timeOffRows.filter((row) => row.provider_id === provider.id).map((row): Interval => ({ startsAt: row.starts_at, endsAt: row.ends_at })),
-        busy: busy.get(provider.id) ?? [],
-      }));
-      const slots = computeSlotsForProviders(schedules, {
-        timeZone: practice.timezone,
-        rules: { slotMinutes: settings.slotMinutes, minNoticeHours: settings.minNoticeHours, maxAdvanceDays: settings.maxAdvanceDays },
-        durationMinutes: type.duration_minutes,
+    return this.tenant.run(auth, (trx) =>
+      this.findSlots(trx, auth.practiceId, {
+        appointmentTypeId: query.appointmentTypeId,
+        providerId: query.providerId,
         from,
         to,
-        now,
         limit: query.limit ?? AVAILABILITY_LIMIT_DEFAULT,
-      });
-      const names = new Map(providers.map((provider) => [provider.id, provider.name]));
-      return {
-        timezone: practice.timezone,
-        slots: slots.map((slot) => ({
-          providerId: slot.providerId,
-          providerName: names.get(slot.providerId) ?? '',
-          appointmentTypeId: type.id,
-          startsAt: slot.startsAt.toISOString(),
-          endsAt: slot.endsAt.toISOString(),
-        })),
-      };
+        now,
+      }),
+    );
+  }
+
+  /**
+   * The open start times for one kind of visit under the practice's rules for callers, earliest first.
+   * Inside any practice-scoped transaction: the staff endpoint above and the AI receptionist's tool both
+   * use it, so what staff see is exactly what a caller would be offered.
+   */
+  async findSlots(
+    trx: Trx,
+    practiceId: string,
+    search: { appointmentTypeId: string; providerId?: string | undefined; from: Date; to: Date; limit: number; now: Date },
+  ): Promise<AvailabilityResponse> {
+    const { from, to, now } = search;
+    const practice = await trx.selectFrom('practices').select('timezone').where('id', '=', practiceId).executeTakeFirstOrThrow();
+    const type = await trx.selectFrom('appointment_types').selectAll().where('id', '=', search.appointmentTypeId).where('active', '=', true).executeTakeFirst();
+    if (!type) {
+      throw new NotFoundException('Appointment type not found');
+    }
+    let providersQuery = trx
+      .selectFrom('providers as p')
+      .innerJoin('provider_appointment_types as link', 'link.provider_id', 'p.id')
+      .select(['p.id', 'p.name', 'p.hours'])
+      .where('link.appointment_type_id', '=', type.id)
+      .where('p.active', '=', true)
+      .orderBy('p.name')
+      .orderBy('p.id');
+    if (search.providerId) providersQuery = providersQuery.where('p.id', '=', search.providerId);
+    const providers = await providersQuery.execute();
+    if (search.providerId && providers.length === 0) {
+      throw new NotFoundException('That provider does not offer this appointment type');
+    }
+
+    const settings = await this.loadSettings(trx, practiceId);
+    const providerIds = providers.map((provider) => provider.id);
+    const timeOffRows =
+      providerIds.length === 0
+        ? []
+        : await trx.selectFrom('provider_time_off').select(['provider_id', 'starts_at', 'ends_at']).where('provider_id', 'in', providerIds).where('active', '=', true).where('ends_at', '>', from).where('starts_at', '<', to).execute();
+
+    // A slot that starts before `to` can run past it, so look for taken times a whole visit beyond the end.
+    const busy = await loadBusy(trx, providerIds, from, new Date(to.getTime() + type.duration_minutes * MINUTE));
+    const schedules: ProviderSchedule[] = providers.map((provider) => ({
+      id: provider.id,
+      hours: normalizeBusinessHours(provider.hours),
+      timeOff: timeOffRows.filter((row) => row.provider_id === provider.id).map((row): Interval => ({ startsAt: row.starts_at, endsAt: row.ends_at })),
+      busy: busy.get(provider.id) ?? [],
+    }));
+    const slots = computeSlotsForProviders(schedules, {
+      timeZone: practice.timezone,
+      rules: { slotMinutes: settings.slotMinutes, minNoticeHours: settings.minNoticeHours, maxAdvanceDays: settings.maxAdvanceDays },
+      durationMinutes: type.duration_minutes,
+      from,
+      to,
+      now,
+      limit: search.limit,
     });
+    const names = new Map(providers.map((provider) => [provider.id, provider.name]));
+    return {
+      timezone: practice.timezone,
+      slots: slots.map((slot) => ({
+        providerId: slot.providerId,
+        providerName: names.get(slot.providerId) ?? '',
+        appointmentTypeId: type.id,
+        startsAt: slot.startsAt.toISOString(),
+        endsAt: slot.endsAt.toISOString(),
+      })),
+    };
   }
 
   // ------------------------------------------------------------------ helpers

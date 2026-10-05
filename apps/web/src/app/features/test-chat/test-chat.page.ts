@@ -27,6 +27,8 @@ function noteFor(reply: AgentReply): string | null {
       return 'The AI’s own reply was not used (it failed a safety check, or the AI model was unavailable), so a fixed safe reply was given instead.';
     case 'scripted_limit':
       return 'This chat reached its length limit.';
+    case 'scripted_booking':
+      return 'Written by the system from the saved appointment, not by the AI. The AI’s own words for this turn were not used.';
     default:
       return null;
   }

@@ -21,6 +21,8 @@ import type { Database } from '../database/database.types.js';
 import { withPracticeContext } from '../database/practice-context.js';
 import { AiService } from '../ai/ai.service.js';
 import type { CreateTaskDto } from '../tasks/tasks.dto.js';
+import { ANYTHING_ELSE } from '../scheduling/appointment-text.js';
+import { SchedulingService } from '../scheduling/scheduling.service.js';
 import { TasksService } from '../tasks/tasks.service.js';
 import { LANGUAGE_MODEL, ModelRequestError, ModelUnavailableError, type LanguageModel, type ModelMessage, type ModelRequest, type ModelResponse } from './model/language-model.js';
 import { buildSystemPrompt, type AgentMode } from './prompt.js';
@@ -75,6 +77,8 @@ interface IncomingTurn {
   text: string;
   startedAt: number;
   meta: RequestMeta;
+  /** What the conversation has already settled about booking, for the model's instructions (empty when booking is off). */
+  bookingNotes: string;
 }
 
 /**
@@ -98,6 +102,7 @@ export class AgentService {
     private readonly tools: AgentTools,
     private readonly tasks: TasksService,
     private readonly ai: AiService,
+    private readonly scheduling: SchedulingService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(AgentService.name);
@@ -228,6 +233,7 @@ export class AgentService {
         .filter((turn) => turn.speaker !== 'system')
         .map((turn) => (turn.speaker === 'caller' ? { role: 'user', text: turn.text } : { role: 'assistant', text: turn.text }));
 
+      const bookingNotes = context.scheduling.enabled && row.escalation === null ? await this.tools.sessionNotes(trx, conversationId) : '';
       return {
         conversationId,
         context,
@@ -239,6 +245,7 @@ export class AgentService {
         text,
         startedAt,
         meta,
+        bookingNotes,
       };
     });
   }
@@ -309,10 +316,10 @@ export class AgentService {
 
   private async answerWithModel(auth: Caller, channel: AgentChannel, turn: IncomingTurn, mode: AgentMode, fixedSuffix: string): Promise<AgentReply> {
     const { conversationId, context, meta } = turn;
-    const state: TurnState = { ended: false, handoffTargetId: null, createdTaskIds: [] };
+    const state: TurnState = { ended: false, handoffTargetId: null, createdTaskIds: [], lines: [] };
     const runtime: ToolRuntime = { practiceId: auth.practiceId, conversationId, context, meta, state, tasksBefore: turn.tasksBefore, callerText: turn.text };
     const isOpen = isOpenAt(context.config.businessHours, context.practice.timezone, new Date());
-    const system = buildSystemPrompt({ practiceName: context.practice.name, isOpen, mode, channel });
+    const system = buildSystemPrompt({ practiceName: context.practice.name, isOpen, mode, channel, scheduling: context.scheduling.enabled, bookingNotes: turn.bookingNotes });
     const messages: ModelMessage[] = [...turn.history, { role: 'user', text: turn.text }];
 
     let draft = '';
@@ -322,14 +329,14 @@ export class AgentService {
     const runRounds = async (): Promise<string> => {
       for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
         // On the last round no tools are offered, so the model has to answer in words.
-        const response = await this.ask({ system, messages, tools: round === MAX_TOOL_ROUNDS ? [] : this.tools.definitions(mode) });
+        const response = await this.ask({ system, messages, tools: round === MAX_TOOL_ROUNDS ? [] : this.tools.definitions(mode, context.scheduling.enabled) });
         if (response.toolCalls.length === 0) {
           return response.text;
         }
         messages.push({ role: 'assistant', text: response.text, toolCalls: response.toolCalls });
         for (const call of response.toolCalls) {
           toolCalls += 1;
-          const refused = toolCalls > MAX_TOOL_CALLS_PER_TURN || !this.tools.isAllowed(mode, call.name);
+          const refused = toolCalls > MAX_TOOL_CALLS_PER_TURN || !this.tools.isAllowed(mode, call.name, context.scheduling.enabled);
           const outcome = refused
             ? { status: 'rejected' as const, result: { error: 'That tool is not available right now' } }
             : await this.runTool(auth, runtime, turn.callerSeq, call.name, call.arguments);
@@ -337,6 +344,10 @@ export class AgentService {
             await this.recordInvocationAlone(auth, conversationId, turn.callerSeq, call.name, call.arguments, outcome.result, 'rejected', 0);
           }
           messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(outcome.result) });
+        }
+        // The backend has written what the caller must hear (a booking, a cancellation...): the model is not asked again.
+        if (state.lines.length > 0) {
+          return '';
         }
       }
       return '';
@@ -346,7 +357,7 @@ export class AgentService {
       // A model that writes tool syntax or code instead of words has made a formatting mistake, not an unsafe one:
       // it gets ONE more chance, told what was wrong, before the caller is given the fixed safe line. Every other
       // kind of blocked reply (an invented diagnosis, a false booking claim...) is never retried.
-      const first = checkReply(stripControl(draft).trim());
+      const first = state.lines.length > 0 ? ({ ok: true } as const) : checkReply(stripControl(draft).trim());
       if (!first.ok && first.reason === 'tool_syntax') {
         messages.push({ role: 'assistant', text: draft }, { role: 'user', text: TOOL_SYNTAX_NOTICE });
         draft = await runRounds();
@@ -363,10 +374,15 @@ export class AgentService {
 
     // Every reply is checked on its way out. A failed or unsafe one is replaced by a fixed line.
     const cleaned = stripControl(draft).trim();
-    const verdict = failure === null ? checkReply(cleaned) : ({ ok: false, reason: failure } as const);
+    // When the backend wrote what the caller must hear, that is the whole reply: it states facts about real appointments,
+    // so the model's words for the turn are dropped and nothing in them can contradict it.
+    const backendReply = state.lines.length > 0 ? `${state.lines.join(' ')} ${ANYTHING_ELSE}` : null;
+    const verdict = backendReply !== null ? ({ ok: true } as const) : failure === null ? checkReply(cleaned) : ({ ok: false, reason: failure } as const);
     const replaced = !verdict.ok;
     let reply: string;
-    if (!replaced) {
+    if (backendReply !== null) {
+      reply = backendReply;
+    } else if (!replaced) {
       reply = cleaned;
     } else if (state.handoffTargetId !== null) {
       reply = URGENT_REPLY_TRANSFER; // the hand-over happened; say only that
@@ -376,10 +392,11 @@ export class AgentService {
     if (fixedSuffix) {
       reply = `${reply} ${fixedSuffix}`;
     }
-    const source: TurnSource = replaced ? 'scripted_guard' : 'model';
+    const source: TurnSource = backendReply !== null ? 'scripted_booking' : replaced ? 'scripted_guard' : 'model';
     const guardReason = verdict.ok ? null : verdict.reason;
     // What the model wrote is kept for reviewers when the safety check replaced it (not when the model simply failed).
     const blockedText = !verdict.ok && failure === null && cleaned !== '' ? cleaned.slice(0, 4_000) : null;
+    // (A turn the backend answered keeps the model's discarded words out of the transcript: only what the caller heard is stored.)
 
     return this.inPractice(auth.practiceId, auth.userId, async (trx) => {
       const row = await this.lockActive(trx, conversationId);
@@ -438,7 +455,7 @@ export class AgentService {
     try {
       return await this.inPractice(auth.practiceId, auth.userId, async (trx) => {
         const outcome = await this.tools.execute(trx, runtime, name, args);
-        await this.recordInvocation(trx, runtime.practiceId, runtime.conversationId, turnSeq, name, args, outcome.result, outcome.status, Date.now() - started);
+        await this.recordInvocation(trx, runtime.practiceId, runtime.conversationId, turnSeq, name, args, outcome.stored ?? outcome.result, outcome.status, Date.now() - started);
         return outcome;
       });
     } catch (error) {
@@ -520,10 +537,12 @@ export class AgentService {
   private async loadContext(trx: Executor, practiceId: string): Promise<{ context: AgentContext }> {
     const practice = await trx.selectFrom('practices').select(['name', 'phone', 'timezone']).where('id', '=', practiceId).executeTakeFirstOrThrow();
     const { settings, targets } = await this.ai.loadForAgent(trx, practiceId);
+    const scheduling = await this.scheduling.loadSettings(trx, practiceId);
     return {
       context: {
         practice,
         targets,
+        scheduling: { enabled: scheduling.aiBookingEnabled },
         config: {
           greeting: settings.greeting,
           emergencyMessage: settings.emergencyMessage,

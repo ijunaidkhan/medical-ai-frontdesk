@@ -114,7 +114,16 @@ describe('scheduling foundations', () => {
   describe('booking rules', () => {
     it('start with sensible defaults, with the AI not allowed to book', async () => {
       const fresh = await get<SchedulingSettings>('/api/scheduling/settings', betaToken);
-      expect(fresh).toEqual({ slotMinutes: 15, minNoticeHours: 2, maxAdvanceDays: 60, cancelMinHours: 24, aiBookingEnabled: false, updatedAt: null });
+      expect(fresh).toEqual({
+        slotMinutes: 15,
+        minNoticeHours: 2,
+        maxAdvanceDays: 60,
+        cancelMinHours: 24,
+        aiBookingEnabled: false,
+        timeFormat: '12h',
+        identityFailureCapPerHour: 30,
+        updatedAt: null,
+      });
       expect(await owner.selectFrom('scheduling_settings').select('practice_id').where('practice_id', '=', beta.practiceId).executeTakeFirst()).toBeUndefined(); // reading creates nothing
     });
 
@@ -128,6 +137,17 @@ describe('scheduling foundations', () => {
       expect(await get<SchedulingSettings>('/api/scheduling/settings')).toMatchObject({ slotMinutes: 15, minNoticeHours: 2, maxAdvanceDays: 90, cancelMinHours: 12 });
     });
 
+    it('the clock format and the identity failure cap can be changed, and are audited by field name', async () => {
+      const saved = (await rules({ timeFormat: '24h', identityFailureCapPerHour: 50 })).body as SchedulingSettings;
+      expect(saved).toMatchObject({ timeFormat: '24h', identityFailureCapPerHour: 50 });
+      const entry = (await audit('scheduling.settings_updated')).at(-1)!;
+      expect(entry.metadata).toEqual({ fields: ['timeFormat', 'identityFailureCapPerHour'] });
+      await patch('/api/scheduling/settings', { timeFormat: '24h', identityFailureCapPerHour: 50 }).expect(400); // nothing changed
+      await rules({ timeFormat: '12h', identityFailureCapPerHour: 30 });
+      await patch('/api/scheduling/settings', { identityFailureCapPerHour: 5 }, token.staff).expect(403); // staff cannot change the rules
+      expect(await get<SchedulingSettings>('/api/scheduling/settings')).toMatchObject({ timeFormat: '12h', identityFailureCapPerHour: 30 });
+    });
+
     it.each([
       ['a slot length that is not offered', { slotMinutes: 7 }],
       ['a slot length that is not a number', { slotMinutes: 'quarter' }],
@@ -138,6 +158,11 @@ describe('scheduling foundations', () => {
       ['a cancellation window over 720 hours', { cancelMinHours: 721 }],
       ['a fraction', { minNoticeHours: 1.5 }],
       ['AI booking as text', { aiBookingEnabled: 'yes' }],
+      ['a clock format that does not exist', { timeFormat: '13h' }],
+      ['a clock format as a number', { timeFormat: 24 }],
+      ['an identity failure cap below 5', { identityFailureCapPerHour: 4 }],
+      ['an identity failure cap above 1000', { identityFailureCapPerHour: 1001 }],
+      ['an identity failure cap that is not a whole number', { identityFailureCapPerHour: 10.5 }],
       ['an unknown field (a practice cannot be named)', { practiceId: SOME_UUID }],
     ])('refuses %s', async (_name, body) => {
       await patch('/api/scheduling/settings', body).expect(400);

@@ -13,6 +13,7 @@ import type { AgentMode } from './prompt.js';
 import { stripControl } from './sanitize.js';
 import { callerIsFinished } from './farewell.js';
 import { chooseTransferTarget } from './safety/escalation.js';
+import { SchedulingTools } from './scheduling-tools.js';
 
 /** A conversation may create at most this many tasks through the receptionist's tool (escalation tasks are separate). */
 export const MAX_TASKS_PER_CONVERSATION = 3;
@@ -27,6 +28,8 @@ export interface AgentContext {
     'greeting' | 'emergencyMessage' | 'crisisMessage' | 'urgentAction' | 'urgentTransferTargetId' | 'afterHoursAction' | 'afterHoursTransferTargetId' | 'businessHours'
   > & { extraUrgentPhrases: string[] };
   targets: TransferTarget[];
+  /** Whether the practice has switched on booking by the AI receptionist (read by the backend; the model is never told how it is set). */
+  scheduling: { enabled: boolean };
 }
 
 /** What tools change during one caller turn; applied to the conversation together with the reply. */
@@ -34,6 +37,8 @@ export interface TurnState {
   ended: boolean;
   handoffTargetId: string | null;
   createdTaskIds: string[];
+  /** Sentences the backend wrote about appointments this turn. When there are any, they are the whole reply and the model's own words are discarded. */
+  lines: string[];
 }
 
 export interface ToolRuntime {
@@ -48,7 +53,8 @@ export interface ToolRuntime {
   callerText: string;
 }
 
-export type ToolResult = { status: 'ok' | 'rejected'; result: Record<string, unknown> };
+/** stored, when present, is what is kept in the record of the call instead of esult (for example codes the model must not see). */
+export type ToolResult = { status: 'ok' | 'rejected'; result: Record<string, unknown>; stored?: Record<string, unknown> };
 
 const TOOL_DEFINITIONS: Record<string, ModelToolDefinition> = {
   search_knowledge: {
@@ -122,13 +128,22 @@ export class AgentTools {
   constructor(
     private readonly retriever: KnowledgeRetriever,
     private readonly tasks: TasksService,
+    private readonly scheduling: SchedulingTools,
   ) {}
 
-  definitions(mode: AgentMode): ModelToolDefinition[] {
-    return TOOLS_BY_MODE[mode].map((name) => TOOL_DEFINITIONS[name]!);
+  /** The scheduling tools exist only in a normal conversation, and only while the practice has booking switched on. */
+  definitions(mode: AgentMode, schedulingEnabled: boolean): ModelToolDefinition[] {
+    const base = TOOLS_BY_MODE[mode].map((name) => TOOL_DEFINITIONS[name]!);
+    return mode === 'normal' && schedulingEnabled ? [...base, ...this.scheduling.definitions()] : base;
   }
 
-  isAllowed(mode: AgentMode, name: string): boolean {
+  /** What the conversation has already settled about booking (identified or not, the codes issued), for the model's instructions. */
+  sessionNotes(trx: Transaction<Database>, conversationId: string): Promise<string> {
+    return this.scheduling.notes(trx, conversationId);
+  }
+
+  isAllowed(mode: AgentMode, name: string, schedulingEnabled: boolean): boolean {
+    if (this.scheduling.handles(name)) return mode === 'normal' && schedulingEnabled;
     return TOOLS_BY_MODE[mode].includes(name);
   }
 
@@ -153,7 +168,7 @@ export class AgentTools {
         runtime.state.ended = true;
         return { status: 'ok', result: { ended: true } };
       default:
-        return { status: 'rejected', result: { error: 'Unknown tool' } };
+        return this.scheduling.handles(name) ? this.scheduling.execute(trx, runtime, name, args) : { status: 'rejected', result: { error: 'Unknown tool' } };
     }
   }
 

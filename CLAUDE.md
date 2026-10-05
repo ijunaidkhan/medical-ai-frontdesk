@@ -120,6 +120,8 @@ Do not hard-code credentials.
 
 Do not commit secrets.
 
+Code commenting and neat and clean to the point code.
+
 ## Code Quality
 
 - Strict TypeScript

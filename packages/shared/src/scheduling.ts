@@ -2,8 +2,8 @@ import type { BusinessHours } from './ai-settings.js';
 
 /**
  * Scheduling: who can be booked (providers), for what (appointment types), when
- * (their hours and days off), and the practice's booking rules. Appointments and
- * patients come in the next step of the scheduling plan.
+ * (their hours and days off), and the practice's booking rules, then the patients
+ * and appointments themselves.
  */
 
 /** Start times are offered on this grid, counted from the start of each working period. */
@@ -23,6 +23,14 @@ export const MIN_NOTICE_HOURS_MAX = 720;
 export const MAX_ADVANCE_DAYS_MAX = 365;
 export const CANCEL_MIN_HOURS_MAX = 720;
 
+/** How times are written and spoken in sentences the system composes: "10:00 AM" or "10:00" ("14:30"). */
+export const TIME_FORMATS = ['12h', '24h'] as const;
+export type TimeFormat = (typeof TIME_FORMATS)[number];
+
+/** Failed identity checks per hour, across the whole practice, after which the AI stops identifying callers for that hour. */
+export const IDENTITY_FAILURE_CAP_MIN = 5;
+export const IDENTITY_FAILURE_CAP_MAX = 1000;
+
 /** The practice's booking rules. */
 export interface SchedulingSettings {
   slotMinutes: SlotMinutes;
@@ -34,6 +42,10 @@ export interface SchedulingSettings {
   cancelMinHours: number;
   /** Whether the AI receptionist may book, cancel and move appointments at all. Off until a person turns it on. */
   aiBookingEnabled: boolean;
+  /** 12-hour or 24-hour clock in the sentences the receptionist speaks about appointments. */
+  timeFormat: TimeFormat;
+  /** After this many failed identity checks in an hour (all callers together) the AI stops identifying callers until the hour has passed. */
+  identityFailureCapPerHour: number;
   updatedAt: string | null;
 }
 
@@ -43,6 +55,8 @@ export const SCHEDULING_DEFAULTS: Omit<SchedulingSettings, 'updatedAt'> = {
   maxAdvanceDays: 60,
   cancelMinHours: 24,
   aiBookingEnabled: false,
+  timeFormat: '12h',
+  identityFailureCapPerHour: 30,
 };
 
 export type UpdateSchedulingSettingsRequest = Partial<Omit<SchedulingSettings, 'updatedAt'>>;

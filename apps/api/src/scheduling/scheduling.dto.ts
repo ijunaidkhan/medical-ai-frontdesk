@@ -4,18 +4,22 @@ import {
   APPOINTMENT_TYPE_NAME_MAX_LENGTH,
   AVAILABILITY_LIMIT_MAX,
   CANCEL_MIN_HOURS_MAX,
+  IDENTITY_FAILURE_CAP_MAX,
+  IDENTITY_FAILURE_CAP_MIN,
   MAX_ADVANCE_DAYS_MAX,
   MAX_APPOINTMENT_TYPES,
   MIN_NOTICE_HOURS_MAX,
   PROVIDER_NAME_MAX_LENGTH,
   PROVIDER_TITLE_MAX_LENGTH,
   SLOT_MINUTES_OPTIONS,
+  TIME_FORMATS,
   TIME_OFF_REASON_MAX_LENGTH,
   type BusinessHours,
   type CreateAppointmentTypeRequest,
   type CreateProviderRequest,
   type CreateTimeOffRequest,
   type SlotMinutes,
+  type TimeFormat,
   type UpdateAppointmentTypeRequest,
   type UpdateProviderRequest,
   type UpdateSchedulingSettingsRequest,
@@ -82,6 +86,16 @@ export class UpdateSchedulingSettingsDto implements UpdateSchedulingSettingsRequ
   @ValidateIf(provided)
   @IsBoolean()
   aiBookingEnabled?: boolean;
+
+  @ValidateIf(provided)
+  @IsIn(TIME_FORMATS)
+  timeFormat?: TimeFormat;
+
+  @ValidateIf(provided)
+  @IsInt()
+  @Min(IDENTITY_FAILURE_CAP_MIN)
+  @Max(IDENTITY_FAILURE_CAP_MAX)
+  identityFailureCapPerHour?: number;
 }
 
 // ----------------------------------------------------------------- providers

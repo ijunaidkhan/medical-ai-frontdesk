@@ -313,6 +313,18 @@ describe('checkReply: blocks what the AI must never say', () => {
     ['booking_claim', 'I have rescheduled your visit.'],
     ['booking_claim', 'I booked you in for Tuesday.'],
     ['booking_claim', 'Your appointment has been cancelled.'],
+    // the same claims with the visit's own name in them (only the backend may say these)
+    ['booking_claim', 'Your follow-up with Dr Khan is booked for Tuesday 7 October at 10:00 AM.'],
+    ['booking_claim', 'Your New Patient Visit is scheduled for Friday.'],
+    ['booking_claim', 'The 10:00 slot is now reserved for you.'],
+    ['booking_claim', 'Your check-up has been moved to Thursday at 2 pm.'],
+    ['booking_claim', 'Your follow-up with Dr Lee on Monday 6 October has been cancelled.'],
+    ['booking_claim', 'Your visit has been rescheduled.'],
+    ['booking_claim', "I've booked that for you."],
+    ['booking_claim', 'I have booked you.'],
+    ['booking_claim', 'I cancelled it.'],
+    ['booking_claim', 'You have an appointment on Tuesday at 10.'],
+    ["booking_claim", "You've got a visit for tomorrow at 3."],
     // pretending to be a person
     ['human_claim', "I'm a nurse and I can help with that."],
     ['human_claim', 'I am a real person.'],
@@ -382,6 +394,17 @@ describe('checkReply: lets ordinary receptionist replies through', () => {
     'You may have to wait a few minutes, our team will call you back.',
     'You could be waiting a little while, may I take your number?',
     'Our clinic also runs a stroke recovery support group on Thursdays.',
+    // the ordinary talk of a booking conversation (offering, asking, explaining a refusal) is not a claim
+    'I have a time on Tuesday at 10:00 AM with Dr Khan. Would that suit you?',
+    'Which of those times works best for you?',
+    'May I have your first name, last name, date of birth and phone number?',
+    'That time is no longer available, but I can look for another one.',
+    'I am sorry, I could not book that time. Would you like me to look for another?',
+    'I can help you book an appointment. What day would suit you?',
+    'Would you like me to book that time for you?',
+    'You can cancel or reschedule an appointment with us up to 24 hours before the visit.',
+    'I am not able to cancel that appointment this close to the visit, but I can ask our team to call you.',
+    'Do you have an appointment already, or would you like to book a new one?',
   ])('%j', (reply) => {
     expect(checkReply(reply)).toEqual({ ok: true });
   });
