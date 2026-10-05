@@ -50,6 +50,10 @@
   @if (auth.can('ai:configure')) {
     <a routerLink="/test-chat" routerLinkActive="active">Test chat</a>
   }
+  @if (auth.can('schedule:read')) {
+    <a routerLink="/schedule" routerLinkActive="active">Schedule</a>
+    <a routerLink="/scheduling-setup" routerLinkActive="active">Scheduling setup</a>
+  }
   @if (auth.can('audit:read')) {
     <a routerLink="/activity" routerLinkActive="active">Activity</a>
   }

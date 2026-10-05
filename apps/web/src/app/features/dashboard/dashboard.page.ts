@@ -3,8 +3,10 @@ import { RouterLink } from '@angular/router';
 import { PERMISSIONS, ROLE_PERMISSIONS, ROLES, type MemberSummary, type Role } from '@frontdesk/shared';
 import { loadForPractice } from '../../core/api/load-state';
 import { PracticeApi } from '../../core/api/practice-api';
+import { SchedulingApi } from '../../core/api/scheduling-api';
 import { AuthService } from '../../core/auth/auth.service';
 import { formatDateTime } from '../../core/format';
+import { addDays, todayIn, zonedInstant } from '../../core/zoned-time';
 import { actorLabel, auditLabel, PERMISSION_DESCRIPTIONS, ROLE_LABELS, ROLE_LABELS_PLURAL } from '../../core/labels';
 
 const RECENT_ACTIVITY_COUNT = 5;
@@ -20,6 +22,7 @@ const RECENT_ACTIVITY_COUNT = 5;
 export class DashboardPage {
   protected readonly auth = inject(AuthService);
   private readonly api = inject(PracticeApi);
+  private readonly scheduling = inject(SchedulingApi);
 
   protected readonly roleLabels = ROLE_LABELS;
   protected readonly roleLabelsPlural = ROLE_LABELS_PLURAL;
@@ -34,6 +37,18 @@ export class DashboardPage {
     this.auth,
     () => this.api.auditLogs({ limit: RECENT_ACTIVITY_COUNT }),
     () => this.auth.can('audit:read'),
+  );
+
+  /** Today's booked appointments, on the practice's own calendar. */
+  protected readonly today = loadForPractice(
+    this.auth,
+    () => {
+      const timeZone = this.auth.practice()?.timezone ?? 'UTC';
+      const date = todayIn(timeZone);
+      const midnight = (day: string) => (zonedInstant(day, '00:00', timeZone) ?? zonedInstant(day, '01:00', timeZone) ?? new Date(`${day}T00:00:00Z`)).toISOString();
+      return this.scheduling.appointments({ from: midnight(date), to: midnight(addDays(date, 1)), status: 'booked' });
+    },
+    () => this.auth.can('schedule:read'),
   );
 
   /** What the current role allows, in plain words. */

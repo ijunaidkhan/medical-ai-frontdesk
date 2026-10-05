@@ -1,0 +1,137 @@
+.intro {
+  margin: 4px 0 20px;
+}
+
+.card {
+  margin-bottom: 16px;
+}
+
+.hint {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+}
+
+.small {
+  margin: 2px 0 0;
+  font-size: 0.875rem;
+}
+
+.problems {
+  margin: 4px 0 12px;
+  padding-left: 20px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 20px;
+}
+
+.number {
+  width: 7rem;
+}
+
+.time {
+  width: 5.5rem;
+  text-align: center;
+}
+
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.editor {
+  margin: 12px 0 16px;
+  padding: 16px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+}
+
+.editor h3 {
+  margin-top: 0;
+}
+
+.choices {
+  margin: 12px 0;
+  padding: 0;
+  border: 0;
+}
+
+.choices legend {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.rows {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+
+.row.inactive .row-main {
+  opacity: 0.65;
+}
+
+.row-main {
+  flex: 1 1 260px;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.time-off {
+  flex: 1 1 100%;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border, #e2e8f0);
+}
+
+.time-off-list {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.time-off-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.time-off-form .field {
+  margin: 0;
+}
+
+.time-off-form .time {
+  margin-left: 6px;
+}

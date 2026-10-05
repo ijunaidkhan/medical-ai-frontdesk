@@ -54,6 +54,32 @@
     }
   </section>
 
+  @if (auth.can('schedule:read')) {
+    <section class="card" aria-labelledby="today-heading">
+      <h2 id="today-heading">Today</h2>
+      @switch (today().status) {
+        @case ('ready') {
+          @if (today(); as state) {
+            @if (state.status === 'ready') {
+              <p><span class="count">{{ state.data.length }}</span>&ngsp;<span class="muted">{{ state.data.length === 1 ? 'appointment' : 'appointments' }}</span></p>
+            }
+          }
+          <a routerLink="/schedule">Open the schedule</a>
+        }
+        @case ('error') {
+          @if (today(); as state) {
+            @if (state.status === 'error') {
+              <p class="alert alert-error" role="alert">{{ state.message }}</p>
+            }
+          }
+        }
+        @default {
+          <p class="muted" role="status">Loading…</p>
+        }
+      }
+    </section>
+  }
+
   @if (auth.can('members:read')) {
     <section class="card" aria-labelledby="team-heading">
       <h2 id="team-heading">Team</h2>

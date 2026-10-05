@@ -1,6 +1,6 @@
 # Scheduling (milestone 3): proposal
 
-Status: **approved 2026-10-01; steps 1 and 2 of 5 built** (steps 3 to 5 are still to do). Decisions taken with the operator (2026-10-01): appointments belong to **providers**, each with their own hours; a caller is identified by **name + phone + date of birth**; the schedule lives **in our own database first** (calendar or EHR connections later).
+Status: **approved 2026-10-01; steps 1 to 4 of 5 built** (step 5, the run against the real models, is still to do). Decisions taken with the operator (2026-10-01): appointments belong to **providers**, each with their own hours; a caller is identified by **name + phone + date of birth**; the schedule lives **in our own database first** (calendar or EHR connections later).
 
 ## What we are building
 
@@ -71,8 +71,8 @@ Caller ─► AI (text or phone) ─► asks for a tool ─► BACKEND decides �
 
 1. Foundations: tables, permissions, the availability engine, and the staff API for providers, types, hours, days off and rules. **Done** (see "Step 1 as built" below).
 2. Patients and appointments (staff API): booking rules, the exclusion constraint, cancel and reschedule, idempotency, audit. **Done** (see "Step 2 as built" below).
-3. AI scheduling: the tools, identity checks, backend-written confirmations, and the AI scheduling switch.
-4. Web: schedule, providers, types, rules, patient search.
+3. AI scheduling: the tools, identity checks, backend-written confirmations, and the AI scheduling switch. **Done** (approved by the operator 2026-10-01; see "Step 3 design" and "Step 3 as built" below).
+4. Web: schedule, providers, types, rules, patient search. **Done** (2026-10-02; see "Step 4 design" below and [web-app.md](web-app.md)).
 5. Conversation test set against the real models, and the documentation.
 6. Later, not in this milestone: text or email confirmations and reminders (needs a messaging provider), connections to Google Calendar or an EHR, several locations, recurring visits, waiting lists.
 
@@ -130,6 +130,122 @@ Caller ─► AI (text or phone) ─► asks for a tool ─► BACKEND decides �
 **Availability** now removes booked times (including a visit that would run into a booked time just past the end of the searched window).
 
 **Not in this step:** editing a patient, marking an appointment completed or no-show (the statuses exist; nothing sets them yet), the AI tools and identity checks (step 3), and the web screens (step 4).
+
+## Step 3 design: the AI receptionist books (approved 2026-10-01, built)
+
+The rule that governs it all: **the AI asks, the backend does, and the backend writes every sentence that states a fact about an appointment.**
+
+### What a conversation looks like
+
+```
+Caller: "I'd like to book a follow-up."
+AI ─► list_appointment_types / find_available_slots      (backend computes real times)
+AI:   "I have Tuesday 7 October at 10:00 AM with Dr Khan, or Wednesday 8 October at 2:30 PM with Dr Lee."
+Caller: "Tuesday please."  (AI asks for first name, last name, date of birth, phone)
+AI ─► book_appointment(slot "A2", name, date of birth, phone)
+BACKEND checks everything, books, and WRITES the reply:
+      "Your follow-up with Dr Khan is booked for Tuesday 7 October at 10:00 AM. Is there anything else I can help you with?"
+```
+
+### Tools (only offered when the practice has switched on AI booking, and never after an emergency or urgent request; the switch is checked again each time a tool runs)
+
+| Tool | What the model gives | What the backend does |
+|---|---|---|
+| `list_appointment_types` | nothing | The visit types a caller can book (active, with an active provider), by name and length. |
+| `find_available_slots` | visit type, optional earliest date, optional morning/afternoon | Up to 5 real slots from the availability engine under the **caller** rules. Each gets a short code (A1, A2...) kept with the conversation; the model passes the code back, **never a time or a provider**, so it cannot invent either. The backend also writes the readable wording of each slot (practice time zone, 12-hour clock). |
+| `verify_patient` | first name, last name, date of birth, phone | Matches all four exactly. Success marks the conversation as verified for that patient. Failure never says which detail was wrong. **Three failures lock identification for the conversation**; the AI then offers to take a message. |
+| `book_appointment` | slot code, first name, last name, date of birth, phone | Re-checks the slot at this moment (caller rules, days off, existing appointments), reuses the patient who matches all four details or adds a new one, books with an idempotency key made from the conversation and the slot, and writes the confirmation. It does **not** mark the conversation as verified (see "Why booking does not verify"). |
+| `list_my_appointments` | nothing | Needs a verified conversation. The caller's own upcoming booked appointments only, each with a short code; the backend writes the list. |
+| `cancel_appointment` | appointment code | Needs verified. Only the verified patient's own appointment; refused inside the cancellation window (the AI is told to take a message for staff instead). The backend writes the confirmation. |
+| `reschedule_appointment` | appointment code, slot code | Needs verified. Same visit type only, same rules and window; the new time is booked and the old released together. The backend writes the confirmation. |
+
+All of these run through the code already built in step 2 (`bookInTransaction`, `cancelInTransaction`, `rescheduleInTransaction`, `findOrCreateInTransaction`) with the actor "AI" and the "caller" rules. The practice always comes from the conversation; no tool takes a practice, patient or appointment id from the model (codes only, resolved from this conversation's own earlier results).
+
+### Backend-written replies
+
+When a tool states a fact about an appointment (booked, listed, cancelled, moved), the reply for that turn **is the backend's sentence**, and whatever the model wrote that turn is discarded. It is stored as a new turn source (`scripted_booking`) so reviewers can see it was not the model. The reply checker keeps blocking booking claims in **every model-written** line, as today. Failures (the time was just taken, not available, inside the cancellation window, not identified) are returned to the model as plain refusals, which it must explain in its own words; those words go through the normal reply checks.
+
+### Identity rules, in detail
+
+- **Why booking does not verify.** If it did, a caller could try date-of-birth guesses through "book" and then list the appointments of whoever matched. So booking never reveals whether a matching patient existed (the confirmation and the errors are identical either way, including "the patient already has something at that time", which is shown to the AI as just "that time is not available"), and seeing, cancelling or moving anything needs `verify_patient`, which counts failures.
+- **Caller ID is not used** in this step (not as proof, not as a hint); the caller says their phone number like their other details.
+- **A cap across conversations.** Three tries per conversation can be repeated with new calls, so the backend also refuses identification for the whole practice when more than 30 verification attempts failed in the last hour (the AI takes a message; staff are told once with an audit event). The numbers are constants for now, not settings.
+- A verified caller hears only the date, time, provider and type of their **own** appointments. Never another patient's, never anything clinical.
+- Names, dates of birth and phones the caller says are kept only where they already are (the transcript the caller's words appear in, and the patient record). The model's tool arguments are recorded for review like every other tool, so staff who can read conversations see them; nothing goes to logs or audit metadata.
+
+### Database (migration 0014)
+
+`conversations`: `verified_patient_id` (composite foreign key to `patients`), `identity_failures` (0 to 3, the database refuses more); `appointments`: `conversation_id` (which call booked it; composite foreign key); `conversation_turns.source` gains `scripted_booking`; the API role may update only the two new conversation columns.
+
+### Other changes
+
+- The system prompt stops saying "you cannot book" **only when booking is on**, and instead explains the tools and the rules (offer only what the tools return, never state a time yourself, ask for all four details before booking, after a booking let the system confirm).
+- `AgentContext` carries whether booking is on and the practice's rules; tools read it, the model never sees it.
+- Audit: `patient.verified` (AI actor, identifiers only), `conversation.identity_locked` (system actor), plus the appointment events from step 2 with the AI as actor and the conversation linked.
+
+### Tests
+
+Scripted-model conversations through the real stack: book; slot taken between offer and booking; invented slot code; wrong or injected codes; verify success, three failures lock, no hint of which detail was wrong, the practice-wide cap; list, cancel, move for the verified patient only; **another patient's appointment code refused**; cancel inside the window refused with a message offered; a model that says "booked" without the tool is still blocked; booking switched off (tools absent and refused if called anyway); an emergency or urgent message in the middle of booking (the emergency script wins, no booking tools afterwards); prompt injection in the caller's words; duplicate tool calls book once; tenant isolation; the backend-written sentences are exact and contain nothing clinical. Then mutation checks on every rule, and in step 5 a run of the conversation set against the real models (Ollama locally, Claude when a key exists).
+
+### Decisions
+
+1. **Booking never verifies; seeing or changing needs `verify_patient`** (above). **Agreed by the operator (2026-10-01).** On a call the caller notices nothing: the AI already has the details and passes them again.
+2. **A practice-wide cap on failed identity checks per hour. Decided by the operator (2026-10-01): keep it, and make it configurable.** A new booking-rules setting (`identityFailureCapPerHour`, default 30, allowed 5 to 1000), set by owners and admins, audited by field name, column in migration 0014. When the cap is reached, identification is refused for the whole practice until the hour has passed (new bookings and messages still work), and one audit event says so. A staff task for it can come later.
+3. **The AI may create new patients** when the details match nobody (a first-time caller). **Decided by the operator (2026-10-01): yes.**
+4. **Time format is a per-practice setting (decided 2026-10-01): 12-hour ("Tuesday 7 October at 10:00 AM") or 24-hour ("Tuesday 7 October at 10:00" / "14:30").** It is a new booking-rules setting (`timeFormat`, default 12-hour), set like the other rules by owners and admins, audited by field name, and used for every sentence the backend writes. Added to migration 0014 and to `PATCH /api/scheduling/settings`.
+5. **Backend confirmation (decided 2026-10-01):** the AI asks and the backend answers; the backend's sentence is what the caller hears. After a successful booking, cancel or move the turn ends immediately without asking the model to compose another reply, which also saves one model round (the slow part).
+
+## Step 3 as built
+
+**Migration `0014_ai_scheduling`:** booking-rules settings `time_format` (`12h` or `24h`, default `12h`) and `identity_failure_cap_per_hour` (5 to 1000, default 30); on `conversations`, `verified_patient_id` (composite foreign key, so never another practice's patient) and `identity_failures` (the database refuses more than 3); on `appointments`, `conversation_id` (which conversation booked it); the turn source `scripted_booking`; an index for counting failed checks per hour.
+
+**Code:** `agent/scheduling-tools.ts` (the seven tools), `scheduling/appointment-text.ts` (every sentence the backend speaks about appointments, in the practice's time zone and clock format), and small changes to the agent: the tool list and the instructions depend on the switch, and a turn in which the backend wrote a sentence ends with that sentence plus "Is there anything else I can help you with?" without asking the model again.
+
+**How it behaves, in short:**
+
+- The model sees codes (S1, S2... for offered times, M1, M2... for the caller's own appointments) and plain words, never an id. What each code means is stored with the tool call (not shown to the model) and only codes issued *in the same conversation* are accepted. On later turns the instructions remind the model, in the system's own words, what each code was and whether the caller is identified.
+- Offered times: at most 5, at most 3 on one day, over the next three weeks, optionally from a date and for mornings or afternoons, under the caller rules.
+- Booking re-checks the time at that moment, finds or adds the patient (matching name without regard to capitals, date of birth and phone; spaces, dashes and brackets in phone numbers are removed), books under the AI's name with a key made from the conversation and the code (asking twice books once), and links the appointment to the conversation. A refusal is undone completely inside the tool (a savepoint) and told to the model in the same words whatever the cause, so it reveals nothing about other patients.
+- **The reply checker now blocks booking claims in the model's words even when they name the visit** ("Your follow-up with Dr Khan is booked for...", "has been cancelled", "You have an appointment on Tuesday"). The backend's own sentences are the only way such words reach a caller.
+- Identification: three failed checks lock it for the conversation (also enforced by the database); incomplete details are not a failure; every failure looks the same; the practice-wide cap counts failed checks in the last hour across all conversations and, once reached, refuses identification for everyone (booking a new visit still works) with one audit event per hour.
+- Cancel and move: only the identified caller's own appointments, the same kind of visit for a move, and never inside the cancellation window (the model is told to offer a message instead).
+- After an emergency or urgent message the scheduling tools disappear, as all tools but the message tools do. Switching booking off takes effect on the next tool call, even in the middle of a turn.
+- On the phone, the backend's sentences are spoken in full (the caller cannot interrupt them), like the safety messages.
+
+**Audit events (new):** `patient.verified` (AI), `conversation.identity_locked` (system), `scheduling.identity_cap_reached` (system); plus `appointment.booked`, `.cancelled`, `.rescheduled` and `patient.created` with the AI as the actor.
+
+**Tests:** 66 conversation tests with the scripted model through the real stack (`test/agent-scheduling.int-spec.ts`), the sentence and clock tests, and the extended reply-checker tests.
+
+**Not in this step:** the web screens (step 4) and a run against the real models (step 5). Small local models may find the codes harder to use than a large hosted model; that is what step 5 measures.
+
+## Step 4 design: web screens (approved 2026-10-02, built)
+
+The operator approved this, including the list-style calendar (a drawn grid can come later). Two new pages, following the existing ones (Angular standalone components, signals, no UI library, **no new dependency**), plus small additions elsewhere. All data comes from the step 1 to 3 API; **no API or database change is needed.**
+
+**1. `/scheduling-setup`: "Scheduling setup"** (seen with `schedule:read`, changed with `schedule:configure`, so owners and admins edit and staff only look; viewers do not see it)
+
+- **Booking rules:** slot length, minimum notice, how far ahead, cancellation window, 12-hour or 24-hour clock, the failed-identity cap, saved together (only what changed is sent, like the AI settings page).
+- **"Let the AI receptionist book" switch**, separate from saving, with the list of what is still missing (from the 409) and why it matters.
+- **Providers:** list (switched-off ones shown greyed), add and edit name, title, weekly hours (the same hours editor as the AI settings page) and which visit types they offer; switch off and on (no delete, as in the API).
+- **Days off per provider:** upcoming list, add (start and end in the practice's time zone, reason), cancel.
+- **Visit types:** name, length, which providers offer it, switch off and on.
+
+**2. `/schedule`: "Schedule"** (seen with `schedule:read`; booking, cancelling and moving with `schedule:manage`, so owners, admins and staff)
+
+- **Calendar as a list, not a drawn grid:** one day or one week at a time, earliest first, grouped by day, each line showing the time, provider, visit type, patient name, and "booked by AI" when it was. Filter by provider; previous, today and next buttons. Times in the practice's time zone and clock format. (A drawn calendar grid can come later; a list is clearer on small screens and needs no library.)
+- **Book:** choose the visit type (and optionally a provider), see the open times the API offers (exactly what a caller would be offered), pick one, then **find the patient** (search by name or phone, at least 2 characters) **or add a new one** (first name, last name, date of birth, phone), confirm. Each booking attempt gets its own idempotency key, created in the browser and **reused if the same attempt is retried** (so a double click or a lost network reply never books twice). "That time was just taken" refreshes the open times.
+- **Cancel** (optional reason, with a confirmation) and **Move** (pick a new open time for the same visit; the old one is released only if the new one is booked, by the API).
+- Cancelled appointments hidden by default, shown with a toggle.
+
+**As built:** the calendar range and days off are converted on the practice's clock in the browser (`core/zoned-time.ts`), the weekly hours editor is a small shared component (`shared/hours-editor`), and the cancel button has its own "danger" style. No API or database change was needed.
+
+**3. Smaller changes:** two menu entries shown only to roles that may use them; the dashboard gets "Today: N appointments" for `schedule:read`; the test chat already marks the backend's own booking sentences ("Written by the system from the saved appointment"); `web-app.md` updated.
+
+**Privacy on screen:** the calendar shows the patient's name only; date of birth and phone appear only in the patient search and the booking form (`patients:read`), and every search and view is audited by the API as today.
+
+**Tests:** component tests for both pages against a fake HTTP backend: what each role sees and can do, only changed fields sent, the AI-booking switch and its missing list, hours validation, booking from search and from a new patient, the idempotency key reused on retry and new for a new attempt, "just taken" refresh, cancel and move, time zone and 12/24-hour display, error messages. Then mutation checks on the permission and idempotency behaviour, and a check against the real dev API through the proxy.
+
+**Order:** setup page first (you need providers before anything can be booked), then the schedule page, then the small changes.
 
 ## Risks and things that need a human decision
 

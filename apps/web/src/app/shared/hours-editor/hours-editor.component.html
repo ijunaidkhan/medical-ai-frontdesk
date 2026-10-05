@@ -1,0 +1,26 @@
+@for (day of weekdays; track day) {
+  <div class="day">
+    <span class="day-name">{{ weekdayLabels[day] }}</span>
+    <div class="periods">
+      @for (period of hours()[day]; track $index; let i = $index) {
+        <div class="period">
+          <label class="visually-hidden" [for]="idPrefix() + '-' + day + '-open-' + i">{{ label(day, 'starts') }}</label>
+          <input [id]="idPrefix() + '-' + day + '-open-' + i" class="input time" type="text" inputmode="numeric" maxlength="5" placeholder="09:00" autocomplete="off" [disabled]="disabled()" [value]="period.open" (input)="setTime(day, i, 'open', value($event))" />
+          <span aria-hidden="true">to</span>
+          <label class="visually-hidden" [for]="idPrefix() + '-' + day + '-close-' + i">{{ label(day, 'ends') }}</label>
+          <input [id]="idPrefix() + '-' + day + '-close-' + i" class="input time" type="text" inputmode="numeric" maxlength="5" placeholder="17:00" autocomplete="off" [disabled]="disabled()" [value]="period.close" (input)="setTime(day, i, 'close', value($event))" />
+          @if (!disabled()) {
+            <button type="button" class="btn btn-quiet" (click)="removePeriod(day, i)" [attr.aria-label]="'Remove this period: ' + label(day, '')">Remove</button>
+          }
+        </div>
+      } @empty {
+        <span class="muted">Not working</span>
+      }
+      @if (!disabled() && hours()[day].length < maxPeriods) {
+        <div class="day-actions">
+          <button type="button" class="btn btn-quiet" (click)="addPeriod(day)">Add a period<span class="visually-hidden"> on {{ weekdayLabels[day] }}</span></button>
+        </div>
+      }
+    </div>
+  </div>
+}

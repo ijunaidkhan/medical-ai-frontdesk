@@ -37,12 +37,17 @@ describe('DashboardPage', () => {
   let fixture: ComponentFixture<DashboardPage>;
   let http: HttpTestingController;
 
-  async function setup(role: Role) {
+  /** The appointments request today's card made (answered here with ppointments), if the role may see the schedule. */
+  let todayRequest: TestRequest | undefined;
+
+  async function setup(role: Role, appointments: unknown[] = []) {
     TestBed.configureTestingModule({ imports: [DashboardPage], providers: [provideRouter([]), ...httpProviders()] });
     http = TestBed.inject(HttpTestingController);
     await signIn(makeSession({ role }));
     fixture = TestBed.createComponent(DashboardPage);
     await render(fixture);
+    todayRequest = http.match((r) => r.url === '/api/appointments')[0];
+    todayRequest?.flush(appointments);
   }
 
   const root = () => fixture.nativeElement as HTMLElement;
@@ -137,6 +142,36 @@ describe('DashboardPage', () => {
     });
   });
 
+  describe('today', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-05T15:00:00Z')); // Monday 11:00 in New York
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('counts today’s booked appointments on the practice’s calendar, and links to the schedule', async () => {
+      await setup('staff', [{ id: 'a1' }, { id: 'a2' }]);
+      expect(todayRequest!.request.params.get('from')).toBe('2026-10-05T04:00:00.000Z');
+      expect(todayRequest!.request.params.get('to')).toBe('2026-10-06T04:00:00.000Z');
+      expect(todayRequest!.request.params.get('status')).toBe('booked');
+      http.expectOne('/api/practice').flush(PRACTICE);
+      http.expectOne('/api/members').flush([]);
+      await render(fixture);
+      expect(root().querySelector('#today-heading')?.parentElement?.textContent?.replace(/\s+/g, ' ')).toContain('2 appointments');
+      expect(root().querySelector('a[href="/schedule"]')).not.toBeNull();
+    });
+
+    it('says "1 appointment", not "1 appointments"', async () => {
+      await setup('staff', [{ id: 'a1' }]);
+      http.expectOne('/api/practice').flush(PRACTICE);
+      http.expectOne('/api/members').flush([]);
+      await render(fixture);
+      const card = root().querySelector('#today-heading')?.parentElement?.textContent ?? '';
+      expect(card).toContain('1 appointment');
+      expect(card).not.toContain('appointments');
+    });
+  });
+
   describe('what each role is allowed to load', () => {
     const requestedBy = async (role: Role) => {
       await setup(role);
@@ -148,13 +183,13 @@ describe('DashboardPage', () => {
       practiceRequest.flush(PRACTICE);
       others.forEach((request) => request.flush(request.request.url === '/api/members' ? [] : { items: [], nextCursor: null }));
       await render(fixture);
-      return others.map((request) => request.request.url).sort();
+      return [...(todayRequest ? ['/api/appointments'] : []), ...others.map((request) => request.request.url)].sort();
     };
 
     it.each<[Role, string[]]>([
-      ['owner', ['/api/audit-logs', '/api/members']],
-      ['admin', ['/api/audit-logs', '/api/members']],
-      ['staff', ['/api/members']],
+      ['owner', ['/api/appointments', '/api/audit-logs', '/api/members']],
+      ['admin', ['/api/appointments', '/api/audit-logs', '/api/members']],
+      ['staff', ['/api/appointments', '/api/members']],
       ['viewer', []],
     ])('%s asks for %j besides the practice', async (role, expected) => {
       expect(await requestedBy(role)).toEqual(expected);
@@ -163,6 +198,7 @@ describe('DashboardPage', () => {
     it('a viewer sees no team or activity sections at all', async () => {
       await requestedBy('viewer');
       expect(root().querySelector('#team-heading')).toBeNull();
+      expect(root().querySelector('#today-heading')).toBeNull();
       expect(root().querySelector('#activity-heading')).toBeNull();
       expect(text()).toContain('Viewer');
       expect(root().querySelectorAll('.allowed li')).toHaveLength(1);

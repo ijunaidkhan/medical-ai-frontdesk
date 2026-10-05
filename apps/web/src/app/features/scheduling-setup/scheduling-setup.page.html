@@ -1,0 +1,364 @@
+<h1>Scheduling setup</h1>
+<p class="muted intro">
+  Who can be booked at {{ auth.practice()?.name }}, for what kind of visit, and when. Times are on your practice’s clock ({{ timeZone() }}).
+  @if (!canEdit()) {
+    You can see this setup but only an owner or administrator can change it.
+  }
+</p>
+
+@if (loadError(); as message) {
+  <p class="alert alert-error" role="alert">{{ message }}</p>
+} @else if (loading()) {
+  <p class="muted" role="status">Loading…</p>
+} @else if (settings(); as current) {
+  <!-- ------------------------------------------------ AI booking switch -->
+  <section class="card" aria-labelledby="ai-title">
+    <h2 id="ai-title">Booking by the AI receptionist</h2>
+    <p role="status">
+      The AI receptionist
+      <span class="badge" [class.badge-warn]="!current.aiBookingEnabled">{{ current.aiBookingEnabled ? 'may book' : 'may not book' }}</span>
+      appointments.
+    </p>
+    <p class="muted hint">
+      When allowed, it offers callers only the open times shown by this setup, and books, cancels or moves an appointment only for a caller who gives matching
+      details. Without it, callers can still leave a message for your team.
+    </p>
+    @if (switchProblems().length > 0) {
+      <div class="alert alert-error" role="alert">
+        <p>It could not be changed:</p>
+        <ul class="problems">
+          @for (problem of switchProblems(); track problem) {
+            <li>{{ problem }}</li>
+          }
+        </ul>
+      </div>
+    }
+    @if (canEdit()) {
+      <button type="button" class="btn" [class.btn-primary]="!current.aiBookingEnabled" [disabled]="switching() || rulesDirty()" (click)="toggleAiBooking()">
+        {{ current.aiBookingEnabled ? 'Stop the AI booking' : 'Let the AI book' }}
+      </button>
+      @if (rulesDirty()) {
+        <p class="muted hint">Save your rule changes first.</p>
+      }
+    }
+  </section>
+
+  <!-- ------------------------------------------------------- the rules -->
+  @if (rules(); as r) {
+    <form class="card" (submit)="$event.preventDefault(); saveRules()" novalidate aria-labelledby="rules-title">
+      <h2 id="rules-title">Booking rules</h2>
+      <div class="grid">
+        <div class="field">
+          <label for="slot-minutes">Offer start times every</label>
+          <select id="slot-minutes" class="input" [disabled]="!canEdit()" (change)="setRule('slotMinutes', value($event))">
+            @for (minutes of slotOptions; track minutes) {
+              <option [value]="minutes" [selected]="minutes + '' === r.slotMinutes">{{ minutes }} minutes</option>
+            }
+          </select>
+        </div>
+        <div class="field">
+          <label for="min-notice">Minimum notice (hours)</label>
+          <input id="min-notice" class="input number" inputmode="numeric" [disabled]="!canEdit()" [value]="r.minNoticeHours" (input)="setRule('minNoticeHours', value($event))" aria-describedby="min-notice-help" />
+          <p id="min-notice-help" class="muted hint">A caller cannot book sooner than this.</p>
+        </div>
+        <div class="field">
+          <label for="max-advance">How far ahead (days)</label>
+          <input id="max-advance" class="input number" inputmode="numeric" [disabled]="!canEdit()" [value]="r.maxAdvanceDays" (input)="setRule('maxAdvanceDays', value($event))" aria-describedby="max-advance-help" />
+          <p id="max-advance-help" class="muted hint">A caller cannot book further ahead than this.</p>
+        </div>
+        <div class="field">
+          <label for="cancel-window">Cancellation window (hours)</label>
+          <input id="cancel-window" class="input number" inputmode="numeric" [disabled]="!canEdit()" [value]="r.cancelMinHours" (input)="setRule('cancelMinHours', value($event))" aria-describedby="cancel-window-help" />
+          <p id="cancel-window-help" class="muted hint">Closer to the visit than this, the AI does not cancel or move it: it takes a message for your team.</p>
+        </div>
+        <div class="field">
+          <label for="time-format">Clock</label>
+          <select id="time-format" class="input" [disabled]="!canEdit()" (change)="chooseTimeFormat($event)">
+            @for (format of timeFormats; track format) {
+              <option [value]="format" [selected]="format === r.timeFormat">{{ format === '12h' ? '12-hour (2:30 PM)' : '24-hour (14:30)' }}</option>
+            }
+          </select>
+        </div>
+        <div class="field">
+          <label for="identity-cap">Failed identity checks per hour</label>
+          <input id="identity-cap" class="input number" inputmode="numeric" [disabled]="!canEdit()" [value]="r.identityFailureCapPerHour" (input)="setRule('identityFailureCapPerHour', value($event))" aria-describedby="identity-cap-help" />
+          <p id="identity-cap-help" class="muted hint">
+            Protects patients’ privacy: after this many wrong details from callers in an hour, the AI stops looking up existing appointments for the rest of that
+            hour (booking new ones still works).
+          </p>
+        </div>
+      </div>
+      @if (rulesProblems().length > 0) {
+        <ul class="problems field-error" role="alert">
+          @for (problem of rulesProblems(); track problem) {
+            <li>{{ problem }}</li>
+          }
+        </ul>
+      }
+      @if (rulesErrors().length > 0) {
+        <div class="alert alert-error" role="alert">
+          <p>The rules were not saved:</p>
+          <ul class="problems">
+            @for (problem of rulesErrors(); track problem) {
+              <li>{{ problem }}</li>
+            }
+          </ul>
+        </div>
+      }
+      @if (rulesSaved()) {
+        <p class="alert" role="status">Saved.</p>
+      }
+      @if (canEdit()) {
+        <button type="submit" class="btn btn-primary" [disabled]="!canSaveRules()">{{ savingRules() ? 'Saving…' : 'Save rules' }}</button>
+      }
+    </form>
+  }
+
+  @if (editorNotice(); as notice) {
+    <p class="alert alert-error" role="alert">{{ notice }}</p>
+  }
+  @if (listError(); as message) {
+    <p class="alert alert-error" role="alert">{{ message }}</p>
+  }
+
+  <!-- ------------------------------------------------------- providers -->
+  <section class="card" aria-labelledby="providers-title">
+    <div class="section-head">
+      <h2 id="providers-title">Providers</h2>
+      @if (canEdit()) {
+        <button type="button" class="btn" (click)="newProvider()">Add a provider</button>
+      }
+    </div>
+    <p class="muted hint">The doctors, nurses, therapists or rooms that can be booked, each with their own weekly hours.</p>
+
+    @if (providerDraft(); as draft) {
+      <form class="editor" (submit)="$event.preventDefault(); saveEditor()" novalidate aria-labelledby="provider-editor-title">
+        <h3 id="provider-editor-title">{{ draft.id ? 'Change ' + providerName(draft.id) : 'New provider' }}</h3>
+        <div class="grid">
+          <div class="field">
+            <label for="provider-name">Name</label>
+            <input id="provider-name" class="input" [maxLength]="limits.providerName" [value]="draft.name" (input)="setProvider('name', value($event))" placeholder="Dr Amina Khan" />
+          </div>
+          <div class="field">
+            <label for="provider-title">Title (optional)</label>
+            <input id="provider-title" class="input" [maxLength]="limits.providerTitle" [value]="draft.title" (input)="setProvider('title', value($event))" placeholder="Family doctor" />
+          </div>
+        </div>
+        <fieldset class="choices">
+          <legend>Kinds of visit they offer</legend>
+          @for (type of types(); track type.id) {
+            <label class="choice">
+              <input type="checkbox" [checked]="draft.appointmentTypeIds.includes(type.id)" (change)="toggleProviderType(type.id, checked($event))" />
+              {{ type.name }} ({{ type.durationMinutes }} min){{ type.active ? '' : ', switched off' }}
+            </label>
+          } @empty {
+            <p class="muted">No kinds of visit yet: add them below, then choose them here.</p>
+          }
+        </fieldset>
+        <h4>Weekly hours</h4>
+        <p class="muted hint">24-hour times such as 09:00 or 17:30. A visit must finish by the end of a period.</p>
+        <app-hours-editor idPrefix="provider-hours" [owner]="draft.name" [hours]="draft.hours" (hoursChange)="setProvider('hours', $event)" />
+        @if (providerProblems().length > 0) {
+          <ul class="problems field-error">
+            @for (problem of providerProblems(); track problem) {
+              <li>{{ problem }}</li>
+            }
+          </ul>
+        }
+        @if (editorErrors().length > 0) {
+          <div class="alert alert-error" role="alert">
+            <p>Not saved:</p>
+            <ul class="problems">
+              @for (problem of editorErrors(); track problem) {
+                <li>{{ problem }}</li>
+              }
+            </ul>
+          </div>
+        }
+        <div class="actions">
+          <button type="submit" class="btn btn-primary" [disabled]="!canSaveEditor()">{{ savingEditor() ? 'Saving…' : draft.id ? 'Save changes' : 'Add provider' }}</button>
+          <button type="button" class="btn btn-quiet" (click)="closeEditor()">{{ editorDirty() ? 'Discard' : 'Close' }}</button>
+        </div>
+      </form>
+    }
+
+    @if (providers().length > 0) {
+      <ul class="rows">
+        @for (provider of providers(); track provider.id) {
+          <li class="row" [class.inactive]="!provider.active">
+            <div class="row-main">
+              <strong>{{ provider.name }}</strong>
+              @if (provider.title) {
+                <span class="muted"> · {{ provider.title }}</span>
+              }
+              @if (!provider.active) {
+                <span class="badge badge-warn">Switched off</span>
+              }
+              <p class="muted small">
+                @for (typeId of provider.appointmentTypeIds; track typeId; let last = $last) {
+                  {{ typeName(typeId) }}{{ last ? '' : ', ' }}
+                } @empty {
+                  Offers no kind of visit yet
+                }
+              </p>
+            </div>
+            <div class="row-actions">
+              <button type="button" class="btn btn-quiet" (click)="showTimeOff(provider)">
+                {{ timeOffProvider()?.id === provider.id ? 'Hide days off' : 'Days off' }}<span class="visually-hidden"> for {{ provider.name }}</span>
+              </button>
+              @if (canEdit()) {
+                <button type="button" class="btn btn-quiet" (click)="editProvider(provider)">Change<span class="visually-hidden"> {{ provider.name }}</span></button>
+                <button type="button" class="btn btn-quiet" (click)="setActive('provider', provider.id, !provider.active)">
+                  {{ provider.active ? 'Switch off' : 'Switch on' }}<span class="visually-hidden"> {{ provider.name }}</span>
+                </button>
+              }
+            </div>
+            @if (timeOffProvider()?.id === provider.id) {
+              <div class="time-off" [attr.aria-label]="'Days off for ' + provider.name" role="region">
+                @if (timeOffLoading()) {
+                  <p class="muted" role="status">Loading…</p>
+                } @else {
+                  <ul class="time-off-list">
+                    @for (item of timeOffList(); track item.id) {
+                      <li>
+                        {{ when(item.startsAt) }} to {{ when(item.endsAt) }}
+                        @if (item.reason) {
+                          <span class="muted"> · {{ item.reason }}</span>
+                        }
+                        @if (canEdit()) {
+                          <button type="button" class="btn btn-quiet" (click)="cancelTimeOff(item)">Cancel<span class="visually-hidden"> this time off</span></button>
+                        }
+                      </li>
+                    } @empty {
+                      <li class="muted">No upcoming days off.</li>
+                    }
+                  </ul>
+                }
+                @if (canEdit()) {
+                  <form class="time-off-form" (submit)="$event.preventDefault(); addTimeOff()" novalidate>
+                    <div class="field">
+                      <label for="off-start-date">From</label>
+                      <input id="off-start-date" class="input" type="date" [value]="timeOffDraft().startDate" (input)="setTimeOff('startDate', value($event))" />
+                      <label class="visually-hidden" for="off-start-time">From time</label>
+                      <input id="off-start-time" class="input time" maxlength="5" [value]="timeOffDraft().startTime" (input)="setTimeOff('startTime', value($event))" />
+                    </div>
+                    <div class="field">
+                      <label for="off-end-date">Until</label>
+                      <input id="off-end-date" class="input" type="date" [value]="timeOffDraft().endDate" (input)="setTimeOff('endDate', value($event))" />
+                      <label class="visually-hidden" for="off-end-time">Until time</label>
+                      <input id="off-end-time" class="input time" maxlength="5" [value]="timeOffDraft().endTime" (input)="setTimeOff('endTime', value($event))" />
+                    </div>
+                    <div class="field">
+                      <label for="off-reason">Reason (optional)</label>
+                      <input id="off-reason" class="input" [maxLength]="limits.reason" [value]="timeOffDraft().reason" (input)="setTimeOff('reason', value($event))" placeholder="Holiday" />
+                    </div>
+                    <button type="submit" class="btn" [disabled]="savingTimeOff() || timeOffProblem() !== null">{{ savingTimeOff() ? 'Adding…' : 'Add days off' }}</button>
+                  </form>
+                  @if (timeOffProblem(); as problem) {
+                    <p class="muted hint">{{ problem }}</p>
+                  }
+                }
+                @if (timeOffError(); as message) {
+                  <p class="alert alert-error" role="alert">{{ message }}</p>
+                }
+              </div>
+            }
+          </li>
+        }
+      </ul>
+    } @else {
+      <p class="muted">No providers yet.</p>
+    }
+  </section>
+
+  <!-- ---------------------------------------------------- kinds of visit -->
+  <section class="card" aria-labelledby="types-title">
+    <div class="section-head">
+      <h2 id="types-title">Kinds of visit</h2>
+      @if (canEdit()) {
+        <button type="button" class="btn" (click)="newType()">Add a kind of visit</button>
+      }
+    </div>
+    <p class="muted hint">For example “New patient visit, 40 minutes” or “Follow-up, 20 minutes”.</p>
+
+    @if (typeDraft(); as draft) {
+      <form class="editor" (submit)="$event.preventDefault(); saveEditor()" novalidate aria-labelledby="type-editor-title">
+        <h3 id="type-editor-title">{{ draft.id ? 'Change ' + typeName(draft.id) : 'New kind of visit' }}</h3>
+        <div class="grid">
+          <div class="field">
+            <label for="type-name">Name</label>
+            <input id="type-name" class="input" [maxLength]="limits.typeName" [value]="draft.name" (input)="setType('name', value($event))" placeholder="Follow-up" />
+          </div>
+          <div class="field">
+            <label for="type-length">Length (minutes)</label>
+            <input id="type-length" class="input number" inputmode="numeric" [value]="draft.durationMinutes" (input)="setType('durationMinutes', value($event))" />
+          </div>
+        </div>
+        <fieldset class="choices">
+          <legend>Providers who offer it</legend>
+          @for (provider of providers(); track provider.id) {
+            <label class="choice">
+              <input type="checkbox" [checked]="draft.providerIds.includes(provider.id)" (change)="toggleTypeProvider(provider.id, checked($event))" />
+              {{ provider.name }}{{ provider.active ? '' : ', switched off' }}
+            </label>
+          } @empty {
+            <p class="muted">No providers yet.</p>
+          }
+        </fieldset>
+        @if (typeProblems().length > 0) {
+          <ul class="problems field-error">
+            @for (problem of typeProblems(); track problem) {
+              <li>{{ problem }}</li>
+            }
+          </ul>
+        }
+        @if (editorErrors().length > 0) {
+          <div class="alert alert-error" role="alert">
+            <p>Not saved:</p>
+            <ul class="problems">
+              @for (problem of editorErrors(); track problem) {
+                <li>{{ problem }}</li>
+              }
+            </ul>
+          </div>
+        }
+        <div class="actions">
+          <button type="submit" class="btn btn-primary" [disabled]="!canSaveEditor()">{{ savingEditor() ? 'Saving…' : draft.id ? 'Save changes' : 'Add kind of visit' }}</button>
+          <button type="button" class="btn btn-quiet" (click)="closeEditor()">{{ editorDirty() ? 'Discard' : 'Close' }}</button>
+        </div>
+      </form>
+    }
+
+    @if (types().length > 0) {
+      <ul class="rows">
+        @for (type of types(); track type.id) {
+          <li class="row" [class.inactive]="!type.active">
+            <div class="row-main">
+              <strong>{{ type.name }}</strong><span class="muted"> · {{ type.durationMinutes }} minutes</span>
+              @if (!type.active) {
+                <span class="badge badge-warn">Switched off</span>
+              }
+              <p class="muted small">
+                @for (providerId of type.providerIds; track providerId; let last = $last) {
+                  {{ providerName(providerId) }}{{ last ? '' : ', ' }}
+                } @empty {
+                  No provider offers it yet
+                }
+              </p>
+            </div>
+            @if (canEdit()) {
+              <div class="row-actions">
+                <button type="button" class="btn btn-quiet" (click)="editType(type)">Change<span class="visually-hidden"> {{ type.name }}</span></button>
+                <button type="button" class="btn btn-quiet" (click)="setActive('type', type.id, !type.active)">
+                  {{ type.active ? 'Switch off' : 'Switch on' }}<span class="visually-hidden"> {{ type.name }}</span>
+                </button>
+              </div>
+            }
+          </li>
+        }
+      </ul>
+    } @else {
+      <p class="muted">No kinds of visit yet.</p>
+    }
+  </section>
+}

@@ -1,0 +1,249 @@
+<div class="head">
+  <h1>Schedule</h1>
+  @if (canManage() && !booking() && !loading() && !loadError()) {
+    <button type="button" class="btn btn-primary" (click)="openBooking()">Book an appointment</button>
+  }
+</div>
+<p class="muted intro">Appointments at {{ auth.practice()?.name }}, on your practice’s clock ({{ timeZone() }}).</p>
+
+@if (notice(); as message) {
+  <p class="alert" role="status">{{ message }}</p>
+}
+
+@if (loadError(); as message) {
+  <p class="alert alert-error" role="alert">{{ message }}</p>
+} @else if (loading()) {
+  <p class="muted" role="status">Loading…</p>
+} @else {
+  <!-- ----------------------------------------------------------- booking -->
+  @if (booking()) {
+    <section class="card booking" aria-labelledby="book-title">
+      <h2 id="book-title">Book an appointment</h2>
+
+      <h3>1. Kind of visit and time</h3>
+      @if (activeTypes().length === 0) {
+        <p class="muted">Nothing can be booked yet: add providers and kinds of visit in Scheduling setup.</p>
+      } @else {
+        <div class="filters">
+          <div class="field">
+            <label for="book-type">Kind of visit</label>
+            <select id="book-type" class="input" (change)="setBookType(value($event))">
+              <option value="" [selected]="bookType() === ''">Choose…</option>
+              @for (type of activeTypes(); track type.id) {
+                <option [value]="type.id" [selected]="type.id === bookType()">{{ type.name }} ({{ type.durationMinutes }} min)</option>
+              }
+            </select>
+          </div>
+          <div class="field">
+            <label for="book-provider">Provider</label>
+            <select id="book-provider" class="input" [disabled]="bookType() === ''" (change)="bookProvider.set(value($event))">
+              <option value="" [selected]="bookProvider() === ''">Anyone</option>
+              @for (provider of providersFor(bookType()); track provider.id) {
+                <option [value]="provider.id" [selected]="provider.id === bookProvider()">{{ provider.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="field">
+            <label for="book-from">From</label>
+            <input id="book-from" class="input" type="date" [value]="bookFrom()" (input)="bookFrom.set(value($event))" />
+          </div>
+          <button type="button" class="btn" [disabled]="bookType() === '' || slotsLoading()" (click)="findTimes()">{{ slotsLoading() ? 'Looking…' : 'Find open times' }}</button>
+        </div>
+
+        @if (slots(); as list) {
+          @if (list.length > 0) {
+            <fieldset class="slots">
+              <legend class="visually-hidden">Open times</legend>
+              @for (slot of list; track slot.providerId + slot.startsAt) {
+                <label class="slot" [class.chosen]="chosenSlot() === slot">
+                  <input type="radio" name="slot" [checked]="chosenSlot() === slot" (change)="chooseSlot(slot)" />
+                  {{ when(slot.startsAt) }} · {{ slot.providerName }}
+                </label>
+              }
+            </fieldset>
+          } @else {
+            <p class="muted" role="status">No open times from that date. Try a later date or another provider.</p>
+          }
+        }
+      }
+
+      @if (chosenSlot()) {
+        <h3>2. Patient</h3>
+        @if (chosenPatient(); as patient) {
+          <p>
+            <strong>{{ patient.firstName }} {{ patient.lastName }}</strong>
+            <span class="muted"> · born {{ patient.dateOfBirth }} · {{ patient.phone }}</span>
+            <button type="button" class="btn btn-quiet" (click)="chosenPatient.set(null)">Choose someone else</button>
+          </p>
+        } @else if (addingPatient()) {
+          <div class="filters">
+            <div class="field">
+              <label for="new-first">First name</label>
+              <input id="new-first" class="input" [maxLength]="limits.name" [value]="newPatient().firstName" (input)="setNewPatient('firstName', value($event))" />
+            </div>
+            <div class="field">
+              <label for="new-last">Last name</label>
+              <input id="new-last" class="input" [maxLength]="limits.name" [value]="newPatient().lastName" (input)="setNewPatient('lastName', value($event))" />
+            </div>
+            <div class="field">
+              <label for="new-dob">Date of birth</label>
+              <input id="new-dob" class="input" type="date" [value]="newPatient().dateOfBirth" (input)="setNewPatient('dateOfBirth', value($event))" />
+            </div>
+            <div class="field">
+              <label for="new-phone">Phone</label>
+              <input id="new-phone" class="input" inputmode="tel" placeholder="+14155550123" [value]="newPatient().phone" (input)="setNewPatient('phone', value($event))" />
+            </div>
+          </div>
+          @if (newPatientProblems().length > 0) {
+            <ul class="problems muted">
+              @for (problem of newPatientProblems(); track problem) {
+                <li>{{ problem }}</li>
+              }
+            </ul>
+          }
+          <p class="muted hint">If this person is already a patient (same name, date of birth and phone), their existing record is used.</p>
+          @if (canFindPatients()) {
+            <button type="button" class="btn btn-quiet" (click)="addingPatient.set(false)">Search instead</button>
+          }
+        } @else {
+          @if (canFindPatients()) {
+            <form class="filters" (submit)="$event.preventDefault(); searchPatients()" role="search">
+              <div class="field">
+                <label for="patient-search">Find a patient (name or phone)</label>
+                <input id="patient-search" class="input" [value]="patientQuery()" (input)="setPatientQuery(value($event))" placeholder="Khan or 555 0123" />
+              </div>
+              <button type="submit" class="btn" [disabled]="patientQuery().trim().length < limits.search || searching()">{{ searching() ? 'Searching…' : 'Search' }}</button>
+            </form>
+            @if (patientResults(); as results) {
+              <ul class="results">
+                @for (patient of results; track patient.id) {
+                  <li>
+                    <button type="button" class="btn btn-quiet" (click)="choosePatient(patient)">
+                      {{ patient.firstName }} {{ patient.lastName }}<span class="muted"> · born {{ patient.dateOfBirth }} · {{ patient.phone }}</span>
+                    </button>
+                  </li>
+                } @empty {
+                  <li class="muted" role="status">No patient found.</li>
+                }
+              </ul>
+            }
+          }
+          <button type="button" class="btn" (click)="startNewPatient()">New patient</button>
+        }
+      }
+
+      @if (bookingError(); as message) {
+        <p class="alert alert-error" role="alert">{{ message }}</p>
+      }
+
+      <div class="actions">
+        @if (chosenSlot()) {
+          <button type="button" class="btn btn-primary" [disabled]="!canConfirm()" (click)="confirmBooking()">
+            {{ saving() ? 'Booking…' : 'Book ' + when(chosenSlot()!.startsAt) }}
+          </button>
+        }
+        <button type="button" class="btn btn-quiet" (click)="closeBooking()">Close</button>
+      </div>
+    </section>
+  }
+
+  <!-- ---------------------------------------------------------- calendar -->
+  <section class="card" aria-labelledby="calendar-title">
+    <div class="toolbar">
+      <div class="group" role="group" aria-label="Show">
+        <button type="button" class="btn" [class.btn-primary]="view() === 'day'" [attr.aria-pressed]="view() === 'day'" (click)="setView('day')">Day</button>
+        <button type="button" class="btn" [class.btn-primary]="view() === 'week'" [attr.aria-pressed]="view() === 'week'" (click)="setView('week')">Week</button>
+      </div>
+      <div class="group">
+        <button type="button" class="btn" (click)="step(-1)">Previous<span class="visually-hidden"> {{ view() }}</span></button>
+        <button type="button" class="btn" (click)="today()">Today</button>
+        <button type="button" class="btn" (click)="step(1)">Next<span class="visually-hidden"> {{ view() }}</span></button>
+        <label class="visually-hidden" for="go-to">Go to date</label>
+        <input id="go-to" class="input" type="date" [value]="anchor()" (change)="goTo(value($event))" />
+      </div>
+      <div class="group">
+        <label for="provider-filter" class="visually-hidden">Provider</label>
+        <select id="provider-filter" class="input" (change)="filterProvider(value($event))">
+          <option value="" [selected]="providerFilter() === ''">All providers</option>
+          @for (provider of providers(); track provider.id) {
+            <option [value]="provider.id" [selected]="provider.id === providerFilter()">{{ provider.name }}</option>
+          }
+        </select>
+        <label class="check"><input type="checkbox" [checked]="showCancelled()" (change)="toggleCancelled($any($event.target).checked)" /> Show cancelled</label>
+      </div>
+    </div>
+
+    <h2 id="calendar-title">{{ title() }}</h2>
+    @if (calendarError(); as message) {
+      <p class="alert alert-error" role="alert">{{ message }}</p>
+    }
+    @if (actionError(); as message) {
+      <p class="alert alert-error" role="alert">{{ message }}</p>
+    }
+    @if (calendarLoading()) {
+      <p class="muted" role="status">Loading…</p>
+    }
+
+    @for (day of byDay(); track day.date) {
+      @if (view() === 'week') {
+        <h3 class="day-heading">{{ day.heading }}</h3>
+      }
+      <ul class="appointments">
+        @for (appointment of day.items; track appointment.id) {
+          <li class="appointment" [class.cancelled]="appointment.status === 'cancelled'">
+            <div class="time">{{ clock(appointment.startsAt) }}<span class="muted">–{{ clock(appointment.endsAt) }}</span></div>
+            <div class="what">
+              <strong>{{ appointment.patient.firstName }} {{ appointment.patient.lastName }}</strong>
+              <span class="muted"> · {{ appointment.appointmentTypeName }} · {{ appointment.providerName }}</span>
+              @if (appointment.bookedBy === 'ai') {
+                <span class="badge">Booked by AI</span>
+              }
+              @if (appointment.status !== 'booked') {
+                <span class="badge badge-warn">{{ appointment.status === 'no_show' ? 'No show' : appointment.status === 'completed' ? 'Completed' : 'Cancelled' }}</span>
+              }
+            </div>
+            @if (canManage() && appointment.status === 'booked') {
+              <div class="row-actions">
+                <button type="button" class="btn btn-quiet" (click)="startMove(appointment)">Move<span class="visually-hidden"> {{ appointment.patient.firstName }} {{ appointment.patient.lastName }}</span></button>
+                <button type="button" class="btn btn-quiet" (click)="startCancel(appointment)">Cancel<span class="visually-hidden"> {{ appointment.patient.firstName }} {{ appointment.patient.lastName }}</span></button>
+              </div>
+            }
+
+            @if (cancelling()?.id === appointment.id) {
+              <form class="inline" (submit)="$event.preventDefault(); confirmCancel()" role="region" [attr.aria-label]="'Cancel this appointment'">
+                <div class="field">
+                  <label for="cancel-reason">Reason (optional)</label>
+                  <input id="cancel-reason" class="input" [maxLength]="limits.reason" [value]="cancelReason()" (input)="cancelReason.set(value($event))" placeholder="Patient called" />
+                </div>
+                <button type="submit" class="btn btn-danger" [disabled]="saving()">{{ saving() ? 'Cancelling…' : 'Cancel the appointment' }}</button>
+                <button type="button" class="btn btn-quiet" (click)="closeAction()">Keep it</button>
+              </form>
+            }
+
+            @if (moving()?.id === appointment.id) {
+              <div class="inline" role="region" [attr.aria-label]="'Move this appointment'">
+                @if (moveSlots(); as list) {
+                  <p>Choose a new time for this {{ appointment.appointmentTypeName }}:</p>
+                  <ul class="results">
+                    @for (slot of list; track slot.providerId + slot.startsAt) {
+                      <li>
+                        <button type="button" class="btn btn-quiet" [disabled]="saving()" (click)="confirmMove(slot)">{{ when(slot.startsAt) }} · {{ slot.providerName }}</button>
+                      </li>
+                    } @empty {
+                      <li class="muted">No open times.</li>
+                    }
+                  </ul>
+                } @else {
+                  <p class="muted" role="status">Finding open times…</p>
+                }
+                <button type="button" class="btn btn-quiet" (click)="closeAction()">Keep the current time</button>
+              </div>
+            }
+          </li>
+        } @empty {
+          <li class="muted empty">No appointments{{ view() === 'week' ? '' : ' this day' }}.</li>
+        }
+      </ul>
+    }
+  </section>
+}

@@ -129,6 +129,17 @@ a {
   color: var(--brand);
 }
 
+/* For an action that undoes something for a patient, such as cancelling an appointment. */
+.btn-danger {
+  background: var(--surface);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
 /* Forms */
 .field {
   display: grid;
