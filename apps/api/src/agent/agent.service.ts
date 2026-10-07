@@ -29,7 +29,8 @@ import { buildSystemPrompt, type AgentMode } from './prompt.js';
 import { jsonSafe, stripControl } from './sanitize.js';
 import { classifyUrgency } from './safety/classifier.js';
 import { CALLBACK_OFFER, higherEscalation, needsNewTask, planEscalation, SAFETY_NET, URGENT_REPLY_TRANSFER, type EscalationPlan } from './safety/escalation.js';
-import { checkReply, SAFE_FALLBACK_REPLY } from './safety/output-guard.js';
+import { checkReply, SAFE_FALLBACK_REPLY, type GuardVerdict } from './safety/output-guard.js';
+import { unsupportedTimes } from './safety/time-check.js';
 import { AgentTools, MAX_TOOL_CALLS_PER_TURN, type AgentContext, type ToolRuntime, type TurnState } from './tools.js';
 
 /** A test chat (or call) longer than this many caller messages is ended. */
@@ -43,6 +44,10 @@ const HISTORY_TURNS = 40;
 /** Said to the model (never to the caller) when its reply was code or a tool request written out as text. */
 export const TOOL_SYNTAX_NOTICE =
   'NOTICE FROM THE SYSTEM, NOT FROM THE CALLER: your last reply could not be used because it contained code or a tool request written out as text. If you need a tool, use the tool mechanism. Otherwise reply again with only plain words for the caller.';
+
+/** Said to the model (never to the caller) when its reply named a time of day that came from nowhere. */
+export const UNVERIFIED_TIME_NOTICE =
+  'NOTICE FROM THE SYSTEM, NOT FROM THE CALLER: your last reply could not be used because it mentioned a time that no tool gave you. Never make up times. To offer appointment times, call find_available_slots and read out exactly what it returns. Otherwise reply again without any times.';
 
 export const LIMIT_REPLY = 'I am sorry, this conversation has reached its length limit. Please contact the practice directly if you still need help.';
 
@@ -352,14 +357,25 @@ export class AgentService {
       }
       return '';
     };
+    /**
+     * The reply checks, plus one that needs this turn's context: every time of day in the reply must come from
+     * a tool result, what the backend has settled in the conversation, or the caller's own words (never from the
+     * model's earlier lines, which may themselves be made up).
+     */
+    const check = (text: string): GuardVerdict => {
+      const verdict = checkReply(text);
+      if (!verdict.ok) return verdict;
+      const sources = [turn.bookingNotes, ...messages.map((message) => (message.role === 'tool' ? message.content : message.role === 'user' ? message.text : ''))].join('\n');
+      return unsupportedTimes(text, sources).length > 0 ? { ok: false, reason: 'unverified_time' } : verdict;
+    };
     try {
       draft = await runRounds();
-      // A model that writes tool syntax or code instead of words has made a formatting mistake, not an unsafe one:
-      // it gets ONE more chance, told what was wrong, before the caller is given the fixed safe line. Every other
-      // kind of blocked reply (an invented diagnosis, a false booking claim...) is never retried.
-      const first = state.lines.length > 0 ? ({ ok: true } as const) : checkReply(stripControl(draft).trim());
-      if (!first.ok && first.reason === 'tool_syntax') {
-        messages.push({ role: 'assistant', text: draft }, { role: 'user', text: TOOL_SYNTAX_NOTICE });
+      // A model that writes tool syntax or code instead of words, or says a time it was never given, gets ONE more
+      // chance, told what was wrong, before the caller is given the fixed safe line. Every other kind of blocked
+      // reply (an invented diagnosis, a false booking claim...) is never retried.
+      const first = state.lines.length > 0 ? ({ ok: true } as const) : check(stripControl(draft).trim());
+      if (!first.ok && (first.reason === 'tool_syntax' || first.reason === 'unverified_time')) {
+        messages.push({ role: 'assistant', text: draft }, { role: 'user', text: first.reason === 'tool_syntax' ? TOOL_SYNTAX_NOTICE : UNVERIFIED_TIME_NOTICE });
         draft = await runRounds();
       }
     } catch (error) {
@@ -377,7 +393,7 @@ export class AgentService {
     // When the backend wrote what the caller must hear, that is the whole reply: it states facts about real appointments,
     // so the model's words for the turn are dropped and nothing in them can contradict it.
     const backendReply = state.lines.length > 0 ? `${state.lines.join(' ')} ${ANYTHING_ELSE}` : null;
-    const verdict = backendReply !== null ? ({ ok: true } as const) : failure === null ? checkReply(cleaned) : ({ ok: false, reason: failure } as const);
+    const verdict = backendReply !== null ? ({ ok: true } as const) : failure === null ? check(cleaned) : ({ ok: false, reason: failure } as const);
     const replaced = !verdict.ok;
     let reply: string;
     if (backendReply !== null) {

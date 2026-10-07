@@ -337,6 +337,10 @@ describe('checkReply: blocks what the AI must never say', () => {
     ['tool_syntax', '  {"name":"end_conversation","arguments":{}}'],
     ['tool_syntax', '[{"name":"get_practice_info","parameters":{}}]'],
     ['tool_syntax', 'Sure! {"name": "create_staff_task", "arguments": {"title": "x"}}'],
+    // a tool narrated or named instead of used (seen with a small local model)
+    ['tool_syntax', 'Let me check. Find_available_slots returns: "No available time slots found."'],
+    ['tool_syntax', 'Can you please use the list_appointment_types tool to see what is available?'],
+    ['tool_syntax', 'I will call verify_patient now.'],
     ['tool_syntax', 'Let me do that. <tool_call>{"name":"x"}</tool_call>'],
     ['tool_syntax', '<function=create_staff_task>{"title":"x"}</function>'],
     ['tool_syntax', '[TOOL_CALLS] create_staff_task'],

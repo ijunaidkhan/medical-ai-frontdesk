@@ -57,7 +57,15 @@ describe('the AI receptionist books appointments', () => {
   const toolNames = (request: ModelRequest) => request.tools.map((t) => t.name);
 
   const start = async (p: Practice) => (await as(app, p.token).post('/api/agent/test-conversations').expect(201)).body as StartConversationResponse;
-  const send = async (p: Practice, id: string, text: string) => (await as(app, p.token).post(`/api/agent/test-conversations/${id}/messages`, { text }).expect(200)).body as AgentReply;
+  /**
+   * One caller message. The backend only accepts a phone number the caller actually said, so when the scripted
+   * model is about to pass one, the caller says it in this message, as a real caller would.
+   */
+  const send = async (p: Practice, id: string, text: string, options: { sayPhone?: boolean } = {}) => {
+    const phones = queue.flatMap((step) => (typeof step === 'function' || step instanceof Error ? [] : step.toolCalls.map((call) => call.arguments['phone']))).filter((phone): phone is string => typeof phone === 'string');
+    const said = options.sayPhone === false || phones.length === 0 ? text : `${text} My phone number is ${[...new Set(phones)].join(' or ')}.`;
+    return (await as(app, p.token).post(`/api/agent/test-conversations/${id}/messages`, { text: said }).expect(200)).body as AgentReply;
+  };
   const detail = async (p: Practice, id: string) => (await as(app, p.token).get(`/api/conversations/${id}`).expect(200)).body as ConversationDetail;
   const rules = (p: Practice, body: object) => as(app, p.token).patch('/api/scheduling/settings', body).expect(200);
   const audit = (action: string, practiceId?: string) => {
@@ -112,10 +120,10 @@ describe('the AI receptionist books appointments', () => {
     return `Your ${type} with ${slot.provider} is booked for ${slot.when}.`;
   };
 
-  /** A conversation in which the caller has been identified and their appointments listed (codes M1, M2...). */
+  /** A conversation in which the caller has been identified, which also lists their appointments (codes M1, M2...). */
   const identified = async (p: Practice, patient: Patient) => {
     const { conversationId } = await start(p);
-    script(callTool('verify_patient', detailsOf(patient)), callTool('list_my_appointments', {}));
+    script(callTool('verify_patient', detailsOf(patient)));
     const reply = await send(p, conversationId, `This is ${patient.firstName}. Please check my appointments.`);
     return { id: conversationId, reply };
   };
@@ -348,6 +356,38 @@ describe('the AI receptionist books appointments', () => {
       expect(JSON.stringify([booked, created])).not.toMatch(/quincy|hushwell|1991|\+1415555/i);
     });
 
+    it('a booking before any time was offered is refused with what to do next, naming the kinds of visit', async () => {
+      const { conversationId } = await start(alpha);
+      let refusal: Record<string, unknown> | undefined;
+      script(callTool('book_appointment', bookArgs('S1')), (request) => {
+        refusal = lastResult(request, 'book_appointment');
+        return say('Let me look for times first.');
+      });
+      await send(alpha, conversationId, 'book me in');
+      expect(String(refusal!['error'])).toContain('No times have been offered yet');
+      expect(String(refusal!['error'])).toContain('Long visit, Visit');
+    });
+
+    it('a code that was not offered is refused with the codes that were', async () => {
+      const { conversationId } = await start(alpha);
+      const shown = await offer(alpha, conversationId);
+      let refusal: Record<string, unknown> | undefined;
+      script(callTool('book_appointment', bookArgs('S9')), (request) => {
+        refusal = lastResult(request, 'book_appointment');
+        return say('Which of the times would you like?');
+      });
+      await send(alpha, conversationId, 'book S9');
+      expect(String(refusal!['error'])).toContain(`S1 = ${shown.slots[0]!.when} with ${shown.slots[0]!.provider}`);
+    });
+
+    it('understands the kind of visit as people say it ("a follow up visit" is "Visit" here, "long visit please" is "Long visit")', async () => {
+      const { conversationId } = await start(alpha);
+      const shown = await offer(alpha, conversationId, { appointmentType: 'a long visit please' });
+      expect(shown.lengthMinutes).toBe(60);
+      const again = await offer(alpha, conversationId, { appointmentType: 'visit' });
+      expect(again.lengthMinutes).toBe(30);
+    });
+
     it('a time the model made up is refused, whatever it is called', async () => {
       const { conversationId } = await start(alpha);
       await offer(alpha, conversationId);
@@ -546,6 +586,45 @@ describe('the AI receptionist books appointments', () => {
 
   // ------------------------------------------------ what the AI may never claim
 
+  describe('the AI cannot make up times', () => {
+    it('a time it was never given gets one retry, then the caller hears the safe line instead', async () => {
+      const { conversationId } = await start(alpha);
+      script(say('We have Monday at 10:00 AM or Tuesday at 2:00 PM.'), say('I still think Tuesday at 2:00 PM works.'));
+      const reply = await send(alpha, conversationId, 'when can I come in?');
+      expect(reply).toMatchObject({ source: 'scripted_guard', reply: SAFE_FALLBACK_REPLY });
+      expect((await detail(alpha, conversationId)).turns.at(-1)).toMatchObject({ guardReason: 'unverified_time' });
+      expect(model.requests).toHaveLength(2);
+      expect(JSON.stringify(model.requests[1]!.messages)).toContain('mentioned a time that no tool gave you');
+    });
+
+    it('a model that corrects itself after the notice is heard', async () => {
+      const { conversationId } = await start(alpha);
+      script(say('How about 10:00 AM tomorrow?'), say('Which day would suit you? I can look up the open times.'));
+      const reply = await send(alpha, conversationId, 'when can I come in?');
+      expect(reply).toMatchObject({ source: 'model', reply: 'Which day would suit you? I can look up the open times.' });
+    });
+
+    it('times that were offered, in this turn or an earlier one, may be said in any form', async () => {
+      const { conversationId } = await start(alpha);
+      let shown: Offered | undefined;
+      script(callTool('find_available_slots', { appointmentType: 'Visit' }), (request) => {
+        shown = lastResult(request, 'find_available_slots') as unknown as Offered;
+        const when = shown.slots[0]!.when; // "Tuesday 6 October at 9:00 AM"
+        return say(`I have ${when} with ${shown.slots[0]!.provider}. Does that work?`);
+      });
+      expect((await send(alpha, conversationId, 'a visit please')).source).toBe('model');
+      const time = shown!.slots[0]!.when.split(' at ')[1]!; // "9:00 AM"
+      script(say(`Yes, ${time.replace(':00', '').toLowerCase()} is still open.`));
+      expect((await send(alpha, conversationId, 'is the first one still free?')).source).toBe('model'); // remembered from the conversation
+    });
+
+    it('opening hours from the practice information, and times the caller said, are fine', async () => {
+      const { conversationId } = await start(alpha);
+      script(callTool('get_practice_info', {}), say('We are open all day, from 00:00 to 24:00... and yes, you asked about 4 pm: I can check that for you.'));
+      expect((await send(alpha, conversationId, 'are you open at 4 pm?')).source).toBe('model');
+    });
+  });
+
   describe('the AI cannot claim what the backend did not do', () => {
     it('a model that says "booked" without the tool is blocked, and nothing is booked', async () => {
       const { conversationId } = await start(alpha);
@@ -602,6 +681,18 @@ describe('the AI receptionist books appointments', () => {
       const system = model.requests.at(-1)!.system;
       expect(system).toContain('Caller identified: yes');
       expect(system).toMatch(/M1 = Visit with Dr Khan on /);
+    });
+
+    it('keeps the same code for an appointment when it is listed again', async () => {
+      const patient = await newPatient(alpha);
+      await staffBook(alpha, patient.id);
+      const { id } = await identified(alpha, patient);
+      script(callTool('list_my_appointments', {}));
+      await send(alpha, id, 'what were my appointments again?');
+      const codes = (await invocations(id))
+        .flatMap((row) => ((row.result as { appointments?: Array<{ code: string; appointmentId: string }> } | null)?.appointments ?? []))
+        .map((item) => item.code);
+      expect(codes).toEqual(['M1', 'M1']);
     });
 
     it('tells a caller with no upcoming appointments so', async () => {
@@ -665,6 +756,40 @@ describe('the AI receptionist books appointments', () => {
       await send(alpha, conversationId, 'ok');
       expect(model.requests.at(-1)!.system).toContain('identification is locked');
       await expect(owner.updateTable('conversations').set({ identity_failures: 4 }).where('id', '=', conversationId).execute()).rejects.toThrow(/check constraint/);
+    });
+
+    it('a phone number the caller did not say is refused, and is not a failed check (the model mistyped it)', async () => {
+      const patient = await newPatient(alpha);
+      const { conversationId } = await start(alpha);
+      let refusal: Record<string, unknown> | undefined;
+      const dropped = patient.phone.slice(0, -1); // one digit missing, as a small model did
+      script(callTool('verify_patient', { ...detailsOf(patient), phone: dropped }), (request) => {
+        refusal = lastResult(request, 'verify_patient');
+        return say('Could you say your phone number again, please?');
+      });
+      await send(alpha, conversationId, `This is me, my number is ${patient.phone}.`, { sayPhone: false });
+      expect(String(refusal!['error'])).toContain('is not what the caller said');
+      expect(await conversationRow(conversationId)).toMatchObject({ identity_failures: 0, verified_patient_id: null });
+    });
+
+    it('a booking with a phone number the caller did not say creates no patient and no appointment', async () => {
+      const { conversationId } = await start(alpha);
+      await offer(alpha, conversationId);
+      const who = person();
+      script(callTool('book_appointment', bookArgs('S1', who)), say('Could you repeat your phone number?'));
+      await send(alpha, conversationId, 'The first one. My number is +1 999 000 1111.', { sayPhone: false });
+      expect(await appointmentsOf(conversationId)).toEqual([]);
+      expect(await patientRows(alpha.practiceId, who.lastName)).toEqual([]);
+    });
+
+    it('a phone number said in an earlier message counts, and spoken digits count too', async () => {
+      const patient = await newPatient(alpha, { phone: '+14155550142' });
+      const { conversationId } = await start(alpha);
+      script(say('Thank you. And your name and date of birth?'));
+      await send(alpha, conversationId, 'My number is four one five, five five five, oh one four two.', { sayPhone: false });
+      script(callTool('verify_patient', detailsOf(patient)));
+      await send(alpha, conversationId, `I am ${patient.firstName} ${patient.lastName}, born ${patient.dateOfBirth}.`, { sayPhone: false });
+      expect((await conversationRow(conversationId)).verified_patient_id).toBe(patient.id);
     });
 
     it('incomplete details are not a failed check', async () => {
@@ -752,7 +877,7 @@ describe('the AI receptionist books appointments', () => {
       };
       const passCheck = async (p: Practice, patient: Patient) => {
         const { conversationId } = await start(p);
-        script(callTool('verify_patient', detailsOf(patient)), say('Thank you.'));
+        script(callTool('verify_patient', detailsOf(patient))); // a match is answered by the system: the model is not asked again
         await send(p, conversationId, 'this is me');
         return (await conversationRow(conversationId)).verified_patient_id;
       };
@@ -897,6 +1022,55 @@ describe('the AI receptionist books appointments', () => {
       const event = (await audit('appointment.rescheduled', alpha.practiceId)).find((e) => e.target_id === rows[1]!.id)!;
       expect(event).toMatchObject({ actor_type: 'ai', actor_user_id: null, metadata: { fromAppointmentId: old.id, source: 'ai' } });
       void movedSentence;
+    });
+
+    it('finds times for a move by the appointment’s code (the same kind of visit), and moves it', async () => {
+      const patient = await newPatient(alpha);
+      const old = await staffBook(alpha, patient.id, alpha.khan, alpha.longVisit.id);
+      const { id } = await identified(alpha, patient);
+      const shown = await offer(alpha, id, { appointmentCode: 'M1' });
+      expect(shown.lengthMinutes).toBe(60); // a long visit, like the appointment being moved
+      script(callTool('reschedule_appointment', { appointmentCode: 'M1', slotCode: 'S1' }));
+      expect((await send(alpha, id, 'the first one please')).source).toBe('scripted_booking');
+      expect(await owner.selectFrom('appointments').select('status').where('id', '=', old.id).executeTakeFirstOrThrow()).toMatchObject({ status: 'cancelled' });
+    });
+
+    it('a time code put in the appointment-code field is ignored: it is an ordinary search, not a move (seen with a small model)', async () => {
+      const { conversationId } = await start(alpha);
+      const shown = await offer(alpha, conversationId, { appointmentType: 'long visit', appointmentCode: 'S1', earliestDate: '' });
+      expect(shown.lengthMinutes).toBe(60);
+    });
+
+    it('an unknown kind of visit is refused with how to book and how to move', async () => {
+      const { conversationId } = await start(alpha);
+      let refusal: Record<string, unknown> | undefined;
+      script(callTool('find_available_slots', { appointmentType: 'move appointment' }), (request) => {
+        refusal = lastResult(request, 'find_available_slots');
+        return say('May I have your details?');
+      });
+      await send(alpha, conversationId, 'I need to move my appointment');
+      expect(refusal).toMatchObject({ availableTypes: ['Long visit', 'Visit'] });
+      expect(String(refusal!['error'])).toContain('first call verify_patient');
+    });
+
+    it('searching by an appointment code needs an identified caller and one of their own codes', async () => {
+      const { conversationId } = await start(alpha);
+      let refusal: Record<string, unknown> | undefined;
+      script(callTool('find_available_slots', { appointmentCode: 'M1' }), (request) => {
+        refusal = lastResult(request, 'find_available_slots');
+        return say('May I have your details first?');
+      });
+      await send(alpha, conversationId, 'move my appointment');
+      expect(String(refusal!['error'])).toContain('has not been identified');
+
+      const patient = await newPatient(alpha);
+      const { id } = await identified(alpha, patient); // no appointments: no codes
+      script(callTool('find_available_slots', { appointmentCode: 'M1' }), (request) => {
+        refusal = lastResult(request, 'find_available_slots');
+        return say('I do not see that appointment.');
+      });
+      await send(alpha, id, 'move M1');
+      expect(String(refusal!['error'])).toContain('not one of the caller');
     });
 
     it('a move to a time that has just been taken changes nothing: the old appointment stays booked', async () => {

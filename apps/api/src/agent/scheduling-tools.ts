@@ -27,13 +27,17 @@ const DAY = 86_400_000;
 /** Identity checks that may fail in one conversation before identification is locked (the database enforces the same number). */
 export const MAX_IDENTITY_FAILURES = 3;
 
+/** Which tools' results hold the codes of offered times, and of the caller's own appointments (verify_patient lists them too). */
+const SLOT_SOURCES = ['find_available_slots'] as const;
+const APPOINTMENT_SOURCES = ['list_my_appointments', 'verify_patient'] as const;
+
 export const SCHEDULING_TOOL_NAMES = ['list_appointment_types', 'find_available_slots', 'verify_patient', 'book_appointment', 'list_my_appointments', 'cancel_appointment', 'reschedule_appointment'] as const;
 
 const PATIENT_DETAILS = {
   firstName: { type: 'string', description: 'The caller\'s first name.' },
   lastName: { type: 'string', description: 'The caller\'s last name.' },
   dateOfBirth: { type: 'string', description: 'Date of birth as YYYY-MM-DD, for example 1990-05-17.' },
-  phone: { type: 'string', description: 'Phone number in international format, for example +14155550123.' },
+  phone: { type: 'string', description: 'The phone number the caller said, written as a plus sign, the country code, then the number, with no spaces.' },
 } as const;
 
 const DEFINITIONS: Record<(typeof SCHEDULING_TOOL_NAMES)[number], ModelToolDefinition> = {
@@ -50,10 +54,11 @@ const DEFINITIONS: Record<(typeof SCHEDULING_TOOL_NAMES)[number], ModelToolDefin
       type: 'object',
       properties: {
         appointmentType: { type: 'string', description: 'The kind of visit, exactly as returned by list_appointment_types.' },
+        appointmentCode: { type: 'string', description: 'When MOVING one of the caller\'s appointments: its code (for example M1) instead of appointmentType.' },
         earliestDate: { type: 'string', description: 'Optional. Do not offer anything before this date (YYYY-MM-DD).' },
         timeOfDay: { type: 'string', enum: ['morning', 'afternoon', 'any'], description: 'Optional. When the caller prefers.' },
       },
-      required: ['appointmentType'],
+      required: [],
       additionalProperties: false,
     },
   },
@@ -112,6 +117,60 @@ function parseDate(text: string | undefined): { year: number; month: number; day
   return check.getUTCFullYear() === year && check.getUTCMonth() === month - 1 && check.getUTCDate() === day ? { year, month, day } : null;
 }
 
+const SPOKEN_DIGITS: Record<string, string> = { zero: '0', oh: '0', o: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9' };
+
+/** The digits in what someone said, in order, with spoken digits ("four one five") turned into figures. */
+export function digitsSaid(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\b(zero|oh|o|one|two|three|four|five|six|seven|eight|nine)\b/g, (word) => SPOKEN_DIGITS[word]!)
+    .replace(/\D/g, '');
+}
+
+/** Each number the caller said, as its digits ("+1 (415) 555-0111" and "four one five, five five five, ..." are one number each). */
+function numbersSaid(text: string): Array<{ digits: string; international: boolean }> {
+  const figures = text.toLowerCase().replace(/\b(zero|oh|o|one|two|three|four|five|six|seven|eight|nine)\b/g, (word) => SPOKEN_DIGITS[word]!);
+  return [...figures.matchAll(/\+?\d[\d\s().,-]*\d/g)].map((match) => ({ digits: match[0].replace(/\D/g, ''), international: match[0].startsWith('+') }));
+}
+
+/**
+ * Whether the caller said this phone number: one of the numbers they said must be exactly it, or exactly it
+ * without the country code (people say "415 555 0111", or "0300 1234567" with the local 0 for +923001234567).
+ * A number with a digit missing, added or changed does not match.
+ */
+export function phoneWasSaid(phone: string, callerWords: string): boolean {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 0) return false;
+  return numbersSaid(callerWords).some((said) => {
+    if (said.digits === digits) return true;
+    // Only a number said WITHOUT a country code may have one added (1 to 3 digits); one said with "+" must match exactly.
+    if (said.international) return false;
+    const national = said.digits.replace(/^0/, '');
+    return national.length >= 7 && digits.endsWith(national) && digits.length - national.length <= 3;
+  });
+}
+
+/** Letters and digits only, lower case: "Follow-up" and "follow up appointment" can then be compared. */
+const squash = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+/**
+ * The visit type the model meant. Models say "follow-up appointment" or "a long visit" rather than the exact
+ * name, so: the exact name first; otherwise the longest name that appears inside what was said; otherwise the
+ * only name that contains what was said. Anything less certain is "not found", and the model is given the list.
+ */
+export function matchType<T extends { name: string }>(types: readonly T[], wanted: string): T | undefined {
+  const said = squash(wanted);
+  if (said === '') return undefined;
+  const exact = types.find((type) => squash(type.name) === said);
+  if (exact) return exact;
+  const inside = types.filter((type) => squash(type.name) !== '' && said.includes(squash(type.name))).sort((a, b) => squash(b.name).length - squash(a.name).length);
+  if (inside.length > 0) return inside[0];
+  // A fragment must be long enough to mean something ("a" is inside almost any name).
+  if (said.length < 3) return undefined;
+  const containing = types.filter((type) => squash(type.name).includes(said));
+  return containing.length === 1 ? containing[0] : undefined;
+}
+
 /** One key per (conversation, action, subject): asking twice for the same thing in one conversation books once. */
 const idempotencyKey = (...parts: string[]): string => `ai-${createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 48)}`;
 
@@ -166,7 +225,7 @@ export class SchedulingTools {
       case 'find_available_slots':
         return this.findSlots(trx, runtime, args, format);
       case 'verify_patient':
-        return this.verify(trx, runtime, args, settings.identityFailureCapPerHour);
+        return this.verify(trx, runtime, args, settings.identityFailureCapPerHour, format);
       case 'book_appointment':
         return this.book(trx, runtime, args, format);
       case 'list_my_appointments':
@@ -212,14 +271,33 @@ export class SchedulingTools {
   }
 
   private async findSlots(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat): Promise<ToolResult> {
-    const wanted = argText(args, 'appointmentType');
-    if (!wanted) {
-      return rejected({ error: 'appointmentType is required. Use list_appointment_types to see the kinds of visit.' });
-    }
     const types = await this.bookableTypes(trx);
-    const type = types.find((candidate) => candidate.name.trim().toLowerCase() === wanted.toLowerCase());
+    const wanted = argText(args, 'appointmentType');
+    // Only a code of the caller's own appointments (M1, M2...) means "moving"; anything else in that field (a small
+    // model put a time's code, S1, there) is ignored, so a plain search is not mistaken for a move.
+    const appointmentCode = /^m\d{1,3}$/i.test(argText(args, 'appointmentCode') ?? '') ? argText(args, 'appointmentCode') : undefined;
+    let type: (typeof types)[number] | undefined;
+    if (appointmentCode) {
+      // Moving an appointment: search for the same kind of visit as the caller's own appointment with that code.
+      const who = await this.requireVerified(trx, runtime);
+      if ('status' in who) return who;
+      const own = await this.ownAppointment(trx, runtime, who.patientId, appointmentCode);
+      if (!own) {
+        return rejected({ error: 'That is not one of the caller\'s appointments listed in this conversation. Use list_my_appointments first.' });
+      }
+      type = types.find((candidate) => candidate.id === own.appointment_type_id);
+    } else if (wanted) {
+      type = matchType(types, wanted);
+    } else if (types.length === 1) {
+      type = types[0]; // only one kind of visit: nothing to choose, so the model does not have to name it
+    } else {
+      return rejected({ error: 'Say which kind of visit (appointmentType), or give appointmentCode when moving an appointment.', availableTypes: types.map((candidate) => candidate.name) });
+    }
     if (!type) {
-      return rejected({ error: 'That kind of visit is not available.', availableTypes: types.map((candidate) => candidate.name) });
+      return rejected({
+        error: `"${wanted ?? ''}" is not a kind of visit. To book, use one of availableTypes. To MOVE an existing appointment, first call verify_patient with the caller's details, then call find_available_slots with appointmentCode (for example M1) instead of appointmentType.`,
+        availableTypes: types.map((candidate) => candidate.name),
+      });
     }
     const timeOfDay = argText(args, 'timeOfDay') ?? 'any';
     if (!['morning', 'afternoon', 'any'].includes(timeOfDay)) {
@@ -262,7 +340,7 @@ export class SchedulingTools {
     }
 
     // Codes are unique across the whole conversation, so "S2" always means the same time.
-    const earlier = (await this.issued<IssuedSlot>(trx, runtime.conversationId, 'find_available_slots', 'slots')).length;
+    const earlier = (await this.issued<IssuedSlot>(trx, runtime.conversationId, SLOT_SOURCES, 'slots')).length;
     const wording = chosen.map((slot) => ({ when: formatWhen(new Date(slot.startsAt), timeZone, format), provider: oneLine(slot.providerName) }));
     const issuedNow = chosen.map(
       (slot, index): IssuedSlot => ({
@@ -287,7 +365,7 @@ export class SchedulingTools {
 
   // ----------------------------------------------------------- who is calling
 
-  private async verify(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, capPerHour: number): Promise<ToolResult> {
+  private async verify(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, capPerHour: number, format: TimeFormat): Promise<ToolResult> {
     const conversation = await trx.selectFrom('conversations').select(['identity_failures']).where('id', '=', runtime.conversationId).forUpdate().executeTakeFirstOrThrow();
     // Locked: no more checks in this conversation, and no hint of what was wrong with any earlier one.
     if (conversation.identity_failures >= MAX_IDENTITY_FAILURES) {
@@ -297,6 +375,9 @@ export class SchedulingTools {
     if ('problems' in details) {
       return rejected({ error: 'Those details are not complete or not valid. Ask the caller again for the missing ones.', problems: details.problems });
     }
+    // A model that mistyped the number is not a caller guessing: refused without counting as a failed check.
+    const misheard = await this.phoneNotSaid(trx, runtime, details.dto.phone);
+    if (misheard) return misheard;
 
     // Many conversations together can still be used to guess: a cap for the whole practice per hour.
     const recent = await trx
@@ -325,7 +406,15 @@ export class SchedulingTools {
         ip: runtime.meta.ip,
         metadata: { conversationId: runtime.conversationId },
       });
-      return { status: 'ok', result: { matched: true, note: 'The caller is identified. They can now hear or change their own appointments.' } };
+      // A caller who is identified almost always wants their appointments next: the system reads them out at once,
+      // which saves a small model two steps (and the codes M1, M2... are ready for cancelling or moving).
+      const listed = await this.listMine(trx, runtime, format);
+      return {
+        status: 'ok',
+        result: { matched: true, ...listed.result, note: 'The caller is identified. The system reads them their appointments. Use the codes if they want to cancel or move one.' },
+        // `matched` stays in the record: the practice-wide cap counts failed checks from it.
+        stored: { matched: true, ...listed.stored },
+      };
     }
 
     // Never says which detail was wrong.
@@ -392,14 +481,23 @@ export class SchedulingTools {
 
   private async book(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat): Promise<ToolResult> {
     const code = argText(args, 'slotCode');
-    const slot = code === undefined ? undefined : (await this.issued<IssuedSlot>(trx, runtime.conversationId, 'find_available_slots', 'slots')).find((candidate) => candidate.code.toLowerCase() === code.toLowerCase());
+    const offered = await this.issued<IssuedSlot>(trx, runtime.conversationId, SLOT_SOURCES, 'slots');
+    const slot = code === undefined ? undefined : offered.find((candidate) => candidate.code.toLowerCase() === code.toLowerCase());
     if (!slot) {
-      return rejected({ error: 'That is not one of the times offered in this conversation. Use find_available_slots and offer one of those.' });
+      // Say exactly what to do next: small models otherwise tell the caller there are no times.
+      if (offered.length === 0) {
+        const types = (await this.bookableTypes(trx)).map((type) => type.name);
+        return rejected({ error: `No times have been offered yet in this conversation. First call find_available_slots (the kinds of visit are: ${types.join(', ')}), read the caller the times it returns, and let them choose.` });
+      }
+      return rejected({ error: `That is not one of the times offered. Use one of these codes: ${offered.map((candidate) => `${candidate.code} = ${candidate.label}`).join('; ')}.` });
     }
     const details = this.details(args);
     if ('problems' in details) {
       return rejected({ error: 'Those details are not complete or not valid. Ask the caller again for the missing ones.', problems: details.problems });
     }
+    // Never store a phone number the caller did not say (a patient record with a wrong number cannot be called back).
+    const misheard = await this.phoneNotSaid(trx, runtime, details.dto.phone);
+    if (misheard) return misheard;
 
     const outcome = await this.attempt(trx, async () => {
       const { patient } = await this.patients.findOrCreateInTransaction(trx, runtime.practiceId, { kind: 'ai' }, details.dto, runtime.meta);
@@ -441,12 +539,15 @@ export class SchedulingTools {
       .limit(SLOTS_OFFERED)
       .execute();
     const timeZone = runtime.context.practice.timezone;
-    const earlier = (await this.issued<IssuedAppointment>(trx, runtime.conversationId, 'list_my_appointments', 'appointments')).length;
+    // An appointment listed earlier in the conversation keeps its code, so "M1" never changes meaning.
+    const earlier = await this.issued<IssuedAppointment>(trx, runtime.conversationId, APPOINTMENT_SOURCES, 'appointments');
+    let next = earlier.reduce((highest, item) => Math.max(highest, Number(item.code.slice(1)) || 0), 0);
     const facts: AppointmentFacts[] = [];
     const issuedNow: IssuedAppointment[] = [];
     for (const [index, row] of rows.entries()) {
       facts.push(await this.factsOf(trx, row.id));
-      issuedNow.push({ code: `M${earlier + index + 1}`, appointmentId: row.id, label: `${oneLine(facts[index]!.typeName)} with ${oneLine(facts[index]!.providerName)} on ${formatWhen(facts[index]!.startsAt, timeZone, format)}` });
+      const code = earlier.find((item) => item.appointmentId === row.id)?.code ?? `M${(next += 1)}`;
+      issuedNow.push({ code, appointmentId: row.id, label: `${oneLine(facts[index]!.typeName)} with ${oneLine(facts[index]!.providerName)} on ${formatWhen(facts[index]!.startsAt, timeZone, format)}` });
     }
     this.say(runtime, listSentence(facts, timeZone, format));
     return {
@@ -462,7 +563,7 @@ export class SchedulingTools {
 
   /** The appointment a code stands for, if it is one of the verified caller's own (anything else looks like "not found"). */
   private async ownAppointment(trx: Trx, runtime: ToolRuntime, patientId: string, code: string | undefined) {
-    const issued = code === undefined ? undefined : (await this.issued<IssuedAppointment>(trx, runtime.conversationId, 'list_my_appointments', 'appointments')).find((candidate) => candidate.code.toLowerCase() === code.toLowerCase());
+    const issued = code === undefined ? undefined : (await this.issued<IssuedAppointment>(trx, runtime.conversationId, APPOINTMENT_SOURCES, 'appointments')).find((candidate) => candidate.code.toLowerCase() === code.toLowerCase());
     if (!issued) return null;
     const row = await trx.selectFrom('appointments').select(['id', 'patient_id', 'appointment_type_id']).where('id', '=', issued.appointmentId).executeTakeFirst();
     return row && row.patient_id === patientId ? row : null;
@@ -492,7 +593,7 @@ export class SchedulingTools {
       return rejected({ error: 'That is not one of the caller\'s appointments listed in this conversation. Use list_my_appointments first.' });
     }
     const code = argText(args, 'slotCode');
-    const slot = code === undefined ? undefined : (await this.issued<IssuedSlot>(trx, runtime.conversationId, 'find_available_slots', 'slots')).find((candidate) => candidate.code.toLowerCase() === code.toLowerCase());
+    const slot = code === undefined ? undefined : (await this.issued<IssuedSlot>(trx, runtime.conversationId, SLOT_SOURCES, 'slots')).find((candidate) => candidate.code.toLowerCase() === code.toLowerCase());
     if (!slot) {
       return rejected({ error: 'That is not one of the times offered in this conversation. Use find_available_slots for the same kind of visit and offer one of those.' });
     }
@@ -530,12 +631,24 @@ export class SchedulingTools {
   async notes(trx: Trx, conversationId: string): Promise<string> {
     const row = await trx.selectFrom('conversations').select(['verified_patient_id', 'identity_failures']).where('id', '=', conversationId).executeTakeFirst();
     const identified = row?.verified_patient_id ? 'yes' : (row?.identity_failures ?? 0) >= MAX_IDENTITY_FAILURES ? 'no, and identification is locked: do not try again, offer to take a message' : 'no';
-    const slots = (await this.issued<IssuedSlot>(trx, conversationId, 'find_available_slots', 'slots')).slice(-10);
-    const listed = (await this.issued<IssuedAppointment>(trx, conversationId, 'list_my_appointments', 'appointments')).slice(-10);
+    const slots = (await this.issued<IssuedSlot>(trx, conversationId, SLOT_SOURCES, 'slots')).slice(-10);
+    const listed = (await this.issued<IssuedAppointment>(trx, conversationId, APPOINTMENT_SOURCES, 'appointments')).slice(-10);
     const lines = [`Booking state of this conversation (written by the system, trusted):`, `- Caller identified: ${identified}`];
     if (slots.length > 0) lines.push(`- Times already offered (use these codes with the tools): ${slots.map((slot) => `${slot.code} = ${slot.label}`).join('; ')}`);
     if (listed.length > 0) lines.push(`- The caller's appointments already listed (use these codes): ${listed.map((item) => `${item.code} = ${item.label}`).join('; ')}`);
     return lines.join('\n');
+  }
+
+  /**
+   * A refusal when the phone number the model passed is not one the caller said anywhere in this conversation
+   * (models drop or repeat digits when copying numbers); null when it was said.
+   */
+  private async phoneNotSaid(trx: Trx, runtime: ToolRuntime, phone: string): Promise<ToolResult | null> {
+    const said = await trx.selectFrom('conversation_turns').select('text').where('conversation_id', '=', runtime.conversationId).where('speaker', '=', 'caller').execute();
+    if (phoneWasSaid(phone, said.map((turn) => turn.text).join(' '))) return null;
+    return rejected({
+      error: `The phone number ${phone} is not what the caller said. Copy the caller's phone number exactly, digit by digit, with the country code, or ask them to say it again.`,
+    });
   }
 
   private details(args: Record<string, unknown>): { dto: CreatePatientDto } | { problems: string[] } {
@@ -592,12 +705,12 @@ export class SchedulingTools {
   }
 
   /** Everything of one kind that this conversation's earlier tool results issued, oldest first. */
-  private async issued<T>(trx: Trx, conversationId: string, tool: string, key: string): Promise<T[]> {
+  private async issued<T>(trx: Trx, conversationId: string, tools: readonly string[], key: string): Promise<T[]> {
     const rows = await trx
       .selectFrom('tool_invocations')
       .select('result')
       .where('conversation_id', '=', conversationId)
-      .where('tool_name', '=', tool)
+      .where('tool_name', 'in', [...tools])
       .where('status', '=', 'ok')
       .orderBy('created_at')
       .orderBy('id')

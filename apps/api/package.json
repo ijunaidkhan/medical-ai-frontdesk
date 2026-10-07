@@ -14,6 +14,7 @@
     "test:e2e": "vitest run --config vitest.config.e2e.ts",
     "test:integration": "vitest run --config vitest.config.integration.ts",
     "test:watch": "vitest",
+    "eval:scheduling": "vitest run --config vitest.config.eval.ts",
     "db:migrate": "npm run build && node dist/database/migrate-cli.js up",
     "db:migrate:down": "npm run build && node dist/database/migrate-cli.js down",
     "db:migrate:status": "npm run build && node dist/database/migrate-cli.js status",

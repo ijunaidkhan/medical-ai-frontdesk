@@ -23,7 +23,7 @@ const provided = (_: unknown, value: unknown) => value !== undefined;
 /** Validate only real values: null is allowed and means "clear this field". */
 const present = (_: unknown, value: unknown) => value !== undefined && value !== null;
 
-const PHONE_MESSAGE = 'contactPhone must be in international format, for example +14155550123';
+const PHONE_MESSAGE = 'contactPhone must be in international format: a plus sign, the country code, then the number, with no spaces';
 
 export class TaskParams {
   @IsUUID()

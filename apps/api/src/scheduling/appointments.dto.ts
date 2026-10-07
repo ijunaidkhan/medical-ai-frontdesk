@@ -58,7 +58,7 @@ export class CreatePatientDto implements CreatePatientRequest {
   @Validate(BirthDateConstraint)
   dateOfBirth!: string;
 
-  @Matches(PHONE_PATTERN, { message: 'phone must be in international format, for example +14155550123' })
+  @Matches(PHONE_PATTERN, { message: 'phone must be in international format: a plus sign, the country code, then the number, with no spaces' })
   phone!: string;
 }
 

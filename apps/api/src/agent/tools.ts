@@ -83,7 +83,7 @@ const TOOL_DEFINITIONS: Record<string, ModelToolDefinition> = {
         title: { type: 'string', description: 'A short summary for staff, for example "Wants an appointment".' },
         details: { type: 'string', description: 'What the caller said they need, in the caller\'s own terms. No medical opinions.' },
         contactName: { type: 'string' },
-        contactPhone: { type: 'string', description: 'International format, for example +14155550123.' },
+        contactPhone: { type: 'string', description: 'The phone number the caller said, written as a plus sign, the country code, then the number, with no spaces.' },
       },
       required: ['type', 'title', 'contactPhone'],
       additionalProperties: false,

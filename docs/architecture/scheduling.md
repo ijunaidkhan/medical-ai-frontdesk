@@ -1,6 +1,6 @@
 # Scheduling (milestone 3): proposal
 
-Status: **approved 2026-10-01; steps 1 to 4 of 5 built** (step 5, the run against the real models, is still to do). Decisions taken with the operator (2026-10-01): appointments belong to **providers**, each with their own hours; a caller is identified by **name + phone + date of birth**; the schedule lives **in our own database first** (calendar or EHR connections later).
+Status: **approved 2026-10-01; all 5 steps built** (2026-10-07). Results with the local model: [evaluations/ai-scheduling-llama3.2-3b.md](../evaluations/ai-scheduling-llama3.2-3b.md). Decisions taken with the operator (2026-10-01): appointments belong to **providers**, each with their own hours; a caller is identified by **name + phone + date of birth**; the schedule lives **in our own database first** (calendar or EHR connections later).
 
 ## What we are building
 
@@ -73,7 +73,7 @@ Caller ─► AI (text or phone) ─► asks for a tool ─► BACKEND decides �
 2. Patients and appointments (staff API): booking rules, the exclusion constraint, cancel and reschedule, idempotency, audit. **Done** (see "Step 2 as built" below).
 3. AI scheduling: the tools, identity checks, backend-written confirmations, and the AI scheduling switch. **Done** (approved by the operator 2026-10-01; see "Step 3 design" and "Step 3 as built" below).
 4. Web: schedule, providers, types, rules, patient search. **Done** (2026-10-02; see "Step 4 design" below and [web-app.md](web-app.md)).
-5. Conversation test set against the real models, and the documentation.
+5. Conversation test set against the real models, and the documentation. **Done** (2026-10-07): `npm run eval:scheduling`; results, backend changes and known limits in [evaluations/ai-scheduling-llama3.2-3b.md](../evaluations/ai-scheduling-llama3.2-3b.md).
 6. Later, not in this milestone: text or email confirmations and reminders (needs a messaging provider), connections to Google Calendar or an EHR, several locations, recurring visits, waiting lists.
 
 ## Step 1 as built

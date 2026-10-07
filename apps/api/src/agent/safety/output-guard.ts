@@ -10,7 +10,9 @@ export type GuardReason =
   | 'booking_claim'
   | 'human_claim'
   | 'prompt_leak'
-  | 'tool_syntax';
+  | 'tool_syntax'
+  /** A time of day the model said that no tool result, nothing settled in the conversation and no caller words contain (see time-check.ts). */
+  | 'unverified_time';
 
 export type GuardVerdict = { ok: true } | { ok: false; reason: GuardReason };
 
@@ -44,7 +46,10 @@ const RULES: Array<{ reason: GuardReason; test: (lowercase: string, normalised: 
       /"(name|function|tool|tool_name|parameters|arguments|args)\s*[[{]/.test(lowercase) ||
       /<\/?\s*(tool_call|tool_calls|function_call|function|tool_use)\b/.test(lowercase) ||
       /\[\s*tool_calls?\s*\]/.test(lowercase) ||
-      /```/.test(lowercase),
+      /```/.test(lowercase) ||
+      // The name of one of the receptionist's own tools: a small model narrating a tool ("find_available_slots
+      // returns...") instead of using it, or telling the caller to use one. Callers never hear these names.
+      /\b(search_knowledge|get_practice_info|create_staff_task|request_human_handoff|end_conversation|list_appointment_types|find_available_slots|verify_patient|book_appointment|list_my_appointments|cancel_appointment|reschedule_appointment)\b/.test(lowercase),
   },
   {
     // Amounts of a medicine, however written: "500 mg", "2 tablets", "0.5ml".
