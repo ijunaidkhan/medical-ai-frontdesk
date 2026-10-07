@@ -54,6 +54,23 @@
     }
   </section>
 
+  @if (auth.can('tasks:read')) {
+    <section class="card" aria-labelledby="tasks-heading">
+      <h2 id="tasks-heading">Tasks</h2>
+      @if (taskCounts(); as counts) {
+        <p><span class="count">{{ counts.open }}{{ counts.more ? '+' : '' }}</span>&ngsp;<span class="muted">to do</span></p>
+        @if (counts.urgent > 0) {
+          <p class="urgent">{{ counts.urgent }} urgent</p>
+        }
+        <a routerLink="/tasks">Open the tasks</a>
+      } @else if (openTasks().status === 'error') {
+        <p class="alert alert-error" role="alert">The tasks could not be loaded.</p>
+      } @else {
+        <p class="muted" role="status">Loading…</p>
+      }
+    </section>
+  }
+
   @if (auth.can('schedule:read')) {
     <section class="card" aria-labelledby="today-heading">
       <h2 id="today-heading">Today</h2>

@@ -1,0 +1,160 @@
+<div class="head">
+  <h1>Tasks</h1>
+  @if (canManage() && editing() !== 'new' && !loadError()) {
+    <button type="button" class="btn btn-primary" (click)="startNew()">New task</button>
+  }
+</div>
+<p class="muted intro">Callbacks and messages for the team at {{ auth.practice()?.name }}, from staff and from the AI receptionist. Urgent ones are listed first.</p>
+
+@if (notice(); as message) {
+  <p class="alert" role="status">{{ message }}</p>
+}
+
+<!-- --------------------------------------------------------------- editor -->
+@if (editing(); as editingId) {
+  <form class="card editor" (submit)="$event.preventDefault(); save()" novalidate aria-labelledby="editor-title">
+    <h2 id="editor-title">{{ editingId === 'new' ? 'New task' : 'Change task' }}</h2>
+    <div class="grid">
+      @if (editingId === 'new') {
+        <div class="field">
+          <label for="task-type">Kind</label>
+          <select id="task-type" class="input" (change)="chooseType(value($event))">
+            @for (type of types; track type) {
+              <option [value]="type" [selected]="type === draft().type">{{ typeLabels[type] }}</option>
+            }
+          </select>
+        </div>
+      }
+      <div class="field">
+        <label for="task-title">Title</label>
+        <input id="task-title" class="input" [maxLength]="limits.title" [value]="draft().title" (input)="set('title', value($event))" placeholder="Call back about an appointment" />
+      </div>
+      <div class="field">
+        <label for="task-contact">Contact name (optional)</label>
+        <input id="task-contact" class="input" [maxLength]="limits.name" [value]="draft().contactName" (input)="set('contactName', value($event))" />
+      </div>
+      <div class="field">
+        <label for="task-phone">Contact phone (optional)</label>
+        <input id="task-phone" class="input" inputmode="tel" placeholder="+14155550123" [value]="draft().contactPhone" (input)="set('contactPhone', value($event))" />
+      </div>
+    </div>
+    <div class="field">
+      <label for="task-details">Details (optional)</label>
+      <textarea id="task-details" class="input" rows="3" [maxLength]="limits.details" [value]="draft().details" (input)="set('details', value($event))"></textarea>
+    </div>
+    <label class="check"><input type="checkbox" [checked]="draft().priority === 'urgent'" (change)="set('priority', $any($event.target).checked ? 'urgent' : 'normal')" /> Urgent</label>
+    @if (draftProblem(); as problem) {
+      <p class="muted hint">{{ problem }}</p>
+    }
+    @if (editError(); as message) {
+      <p class="alert alert-error" role="alert">{{ message }}</p>
+    }
+    <div class="actions">
+      <button type="submit" class="btn btn-primary" [disabled]="saving() || draftProblem() !== null">{{ saving() ? 'Saving…' : editingId === 'new' ? 'Add task' : 'Save changes' }}</button>
+      <button type="button" class="btn btn-quiet" (click)="closeEditor()">Close</button>
+    </div>
+  </form>
+}
+
+<!-- --------------------------------------------------------------- filters -->
+<div class="filters" role="group" aria-label="Show">
+  <div class="field">
+    <label for="filter-status">Status</label>
+    <select id="filter-status" class="input" (change)="setStatus(value($event))">
+      <option value="active" [selected]="status() === 'active'">To do (open and in progress)</option>
+      <option value="open" [selected]="status() === 'open'">Open</option>
+      <option value="in_progress" [selected]="status() === 'in_progress'">In progress</option>
+      <option value="done" [selected]="status() === 'done'">Done</option>
+      <option value="cancelled" [selected]="status() === 'cancelled'">Cancelled</option>
+      <option value="all" [selected]="status() === 'all'">All</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="filter-assignee">Assigned to</label>
+    <select id="filter-assignee" class="input" (change)="setAssignee(value($event))">
+      <option value="" [selected]="assignee() === ''">Anyone</option>
+      <option value="me" [selected]="assignee() === 'me'">Me</option>
+      <option value="unassigned" [selected]="assignee() === 'unassigned'">Nobody yet</option>
+      @for (member of activeMembers(); track member.userId) {
+        <option [value]="member.userId" [selected]="assignee() === member.userId">{{ member.displayName }}</option>
+      }
+    </select>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------------ list -->
+@if (loadError(); as message) {
+  <p class="alert alert-error" role="alert">{{ message }}</p>
+} @else if (loading()) {
+  <p class="muted" role="status">Loading…</p>
+} @else {
+  <ul class="tasks">
+    @for (task of tasks(); track task.id) {
+      <li class="card task" [class.urgent]="task.priority === 'urgent'" [class.finished]="isFinished(task)">
+        <div class="task-head">
+          @if (task.priority === 'urgent') {
+            <span class="badge badge-urgent">Urgent</span>
+          }
+          <strong class="title">{{ task.title }}</strong>
+          <span class="badge">{{ typeLabels[task.type] }}</span>
+          <span class="badge" [class.badge-warn]="isFinished(task)">{{ statusLabels[task.status] }}</span>
+        </div>
+        @if (task.details) {
+          <p class="details">{{ task.details }}</p>
+        }
+        @if (task.contactName || task.contactPhone) {
+          <p class="contact">
+            {{ task.contactName }}
+            @if (task.contactPhone) {
+              <a [href]="'tel:' + task.contactPhone">{{ task.contactPhone }}</a>
+            }
+          </p>
+        }
+        <p class="muted small">
+          @if (task.createdBy.kind === 'ai') {
+            From the AI receptionist
+          } @else {
+            Added by {{ task.createdBy.person?.name ?? 'a former member' }}
+          }
+          · {{ when(task.createdAt) }} · {{ task.assignedTo ? 'Assigned to ' + task.assignedTo.name : 'Not assigned' }}
+          @if (task.conversationId && canSeeConversations()) {
+            · <a [routerLink]="['/conversations', task.conversationId]">See the conversation</a>
+          }
+        </p>
+
+        @if (canManage()) {
+          <div class="task-actions">
+            @for (status of moves(task); track status) {
+              <button type="button" class="btn" [class.btn-primary]="status === 'done'" [disabled]="busy() === task.id" (click)="move(task, status)">
+                {{ actionLabels[status] }}<span class="visually-hidden">: {{ task.title }}</span>
+              </button>
+            }
+            @if (!isFinished(task)) {
+              @if (task.assignedTo?.userId !== auth.user()?.id) {
+                <button type="button" class="btn btn-quiet" [disabled]="busy() === task.id" (click)="assignToMe(task)">Assign to me<span class="visually-hidden">: {{ task.title }}</span></button>
+              }
+              <label class="visually-hidden" [for]="'assign-' + task.id">Assign {{ task.title }} to</label>
+              <select [id]="'assign-' + task.id" class="input assign" [disabled]="busy() === task.id" (change)="assign(task, value($event))">
+                <option value="" [selected]="!task.assignedTo">Not assigned</option>
+                @for (member of activeMembers(); track member.userId) {
+                  <option [value]="member.userId" [selected]="task.assignedTo?.userId === member.userId">{{ member.displayName }}</option>
+                }
+              </select>
+              <button type="button" class="btn btn-quiet" (click)="startEdit(task)">Change<span class="visually-hidden">: {{ task.title }}</span></button>
+            } @else {
+              <span class="muted small">Reopen it to change it.</span>
+            }
+          </div>
+        }
+        @if (rowError()?.taskId === task.id) {
+          <p class="alert alert-error" role="alert">{{ rowError()!.message }}</p>
+        }
+      </li>
+    } @empty {
+      <li class="muted empty">No tasks here.</li>
+    }
+  </ul>
+  @if (nextCursor()) {
+    <button type="button" class="btn" [disabled]="loadingMore()" (click)="loadMore()">{{ loadingMore() ? 'Loading…' : 'Load more' }}</button>
+  }
+}

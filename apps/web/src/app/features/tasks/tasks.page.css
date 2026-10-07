@@ -1,0 +1,108 @@
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.intro {
+  margin: 4px 0 16px;
+}
+
+.hint,
+.small {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0 16px;
+}
+
+.editor {
+  margin-bottom: 16px;
+}
+
+textarea.input {
+  resize: vertical;
+  font: inherit;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.actions,
+.filters,
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+}
+
+.actions {
+  margin-top: 12px;
+}
+
+.filters .field {
+  margin-bottom: 12px;
+}
+
+.tasks {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.task {
+  margin-bottom: 10px;
+}
+
+.task.urgent {
+  border-left: 4px solid var(--danger);
+}
+
+.task.finished {
+  opacity: 0.75;
+}
+
+.task-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.badge-urgent {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.details {
+  margin: 6px 0 0;
+  white-space: pre-line;
+}
+
+.contact {
+  margin: 4px 0 0;
+}
+
+.task-actions {
+  margin-top: 8px;
+  align-items: center;
+}
+
+.assign {
+  width: auto;
+  min-width: 10rem;
+}
+
+.empty {
+  padding: 8px 0;
+}

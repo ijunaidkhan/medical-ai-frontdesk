@@ -4,6 +4,7 @@ import { PERMISSIONS, ROLE_PERMISSIONS, ROLES, type MemberSummary, type Role } f
 import { loadForPractice } from '../../core/api/load-state';
 import { PracticeApi } from '../../core/api/practice-api';
 import { SchedulingApi } from '../../core/api/scheduling-api';
+import { TasksApi } from '../../core/api/tasks-api';
 import { AuthService } from '../../core/auth/auth.service';
 import { formatDateTime } from '../../core/format';
 import { addDays, todayIn, zonedInstant } from '../../core/zoned-time';
@@ -23,6 +24,7 @@ export class DashboardPage {
   protected readonly auth = inject(AuthService);
   private readonly api = inject(PracticeApi);
   private readonly scheduling = inject(SchedulingApi);
+  private readonly tasksApi = inject(TasksApi);
 
   protected readonly roleLabels = ROLE_LABELS;
   protected readonly roleLabelsPlural = ROLE_LABELS_PLURAL;
@@ -50,6 +52,14 @@ export class DashboardPage {
     },
     () => this.auth.can('schedule:read'),
   );
+
+  /** The work queue at a glance: open and in-progress tasks (urgent ones come first, so a full page still shows them all). */
+  protected readonly openTasks = loadForPractice(this.auth, () => this.tasksApi.list({ status: 'active', limit: 200 }), () => this.auth.can('tasks:read'));
+  protected readonly taskCounts = computed(() => {
+    const state = this.openTasks();
+    if (state.status !== 'ready') return null;
+    return { open: state.data.items.length, more: state.data.nextCursor !== null, urgent: state.data.items.filter((task) => task.priority === 'urgent').length };
+  });
 
   /** What the current role allows, in plain words. */
   protected readonly allowed = computed(() => {

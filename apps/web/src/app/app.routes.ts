@@ -44,6 +44,24 @@ export const routes: Routes = [
         loadComponent: () => import('./features/test-chat/test-chat.page').then((m) => m.TestChatPage),
       },
       {
+        path: 'tasks',
+        title: 'Tasks · AI Front Desk',
+        canActivate: [permissionGuard('tasks:read')],
+        loadComponent: () => import('./features/tasks/tasks.page').then((m) => m.TasksPage),
+      },
+      {
+        path: 'conversations',
+        title: 'Conversations · AI Front Desk',
+        canActivate: [permissionGuard('calls:read')],
+        loadComponent: () => import('./features/conversations/conversations.page').then((m) => m.ConversationsPage),
+      },
+      {
+        path: 'conversations/:id',
+        title: 'Conversation · AI Front Desk',
+        canActivate: [permissionGuard('calls:read')],
+        loadComponent: () => import('./features/conversations/conversation.page').then((m) => m.ConversationPage),
+      },
+      {
         path: 'schedule',
         title: 'Schedule · AI Front Desk',
         canActivate: [permissionGuard('schedule:read')],

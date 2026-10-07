@@ -1,6 +1,11 @@
 import type {
   AfterHoursAction,
   AuditLogEntry,
+  ConversationChannel,
+  ConversationOutcome,
+  TaskStatus,
+  TaskType,
+  TurnSource,
   KnowledgeCategory,
   KnowledgeStatus,
   Permission,
@@ -142,6 +147,102 @@ const AUDIT_LABELS: Readonly<Record<string, string>> = {
   'ai.transfer_target_created': 'Transfer number added',
   'ai.transfer_target_updated': 'Transfer number changed',
 };
+
+export const TASK_TYPE_LABELS: Readonly<Record<TaskType, string>> = {
+  callback: 'Call back',
+  message: 'Message',
+  question: 'Question',
+  other: 'Other',
+};
+
+export const TASK_STATUS_LABELS: Readonly<Record<TaskStatus, string>> = {
+  open: 'Open',
+  in_progress: 'In progress',
+  done: 'Done',
+  cancelled: 'Cancelled',
+};
+
+/** The button that moves a task into a status. */
+export const TASK_ACTION_LABELS: Readonly<Record<TaskStatus, string>> = {
+  open: 'Reopen',
+  in_progress: 'Start',
+  done: 'Mark done',
+  cancelled: 'Cancel task',
+};
+
+export const CHANNEL_LABELS: Readonly<Record<ConversationChannel, string>> = {
+  test_chat: 'Test chat',
+  phone: 'Phone call',
+};
+
+export const OUTCOME_LABELS: Readonly<Record<ConversationOutcome, string>> = {
+  answered: 'Answered',
+  message_taken: 'Message taken',
+  handed_off: 'Handed to a person',
+  emergency: 'Emergency',
+  abandoned: 'Caller left',
+};
+
+/** What the AI receptionist did with each tool, in plain words. */
+const TOOL_LABELS: Readonly<Record<string, string>> = {
+  search_knowledge: 'Looked up clinic information',
+  get_practice_info: 'Looked up opening hours and contact details',
+  create_staff_task: 'Left a message for the team',
+  request_human_handoff: 'Asked to hand the call to a person',
+  end_conversation: 'Ended the conversation',
+  list_appointment_types: 'Listed the kinds of visit',
+  find_available_slots: 'Searched open appointment times',
+  verify_patient: 'Checked who the caller is',
+  book_appointment: 'Booked an appointment',
+  list_my_appointments: 'Listed the caller’s appointments',
+  cancel_appointment: 'Cancelled an appointment',
+  reschedule_appointment: 'Moved an appointment',
+};
+
+export function toolLabel(tool: string): string {
+  return TOOL_LABELS[tool] ?? tool;
+}
+
+/** Why the safety check replaced what the AI wrote, in plain words. */
+const GUARD_REASON_LABELS: Readonly<Record<string, string>> = {
+  empty: 'the AI gave no answer',
+  too_long: 'the answer was too long',
+  diagnosis: 'it sounded like a diagnosis',
+  medication_advice: 'it gave medication advice',
+  treatment_advice: 'it gave treatment advice',
+  false_reassurance: 'it reassured the caller about symptoms',
+  booking_claim: 'it claimed an appointment was booked or changed',
+  human_claim: 'it claimed to be a person',
+  prompt_leak: 'it talked about its own instructions',
+  tool_syntax: 'it wrote code or a tool request instead of words',
+  unverified_time: 'it mentioned a time that was never offered',
+  model_unavailable: 'the AI model did not answer in time',
+  model_error: 'the AI model returned an error',
+};
+
+export function guardReasonLabel(reason: string): string {
+  return GUARD_REASON_LABELS[reason] ?? reason;
+}
+
+/** Said under a line so a reviewer can always tell the AI's own words from a fixed or system-written one; null for the AI's own. */
+export function turnSourceNote(source: TurnSource): string | null {
+  switch (source) {
+    case 'greeting':
+      return 'The practice’s greeting, with the AI notice that is always added.';
+    case 'scripted_emergency':
+      return 'Fixed safety message, not written by the AI. Staff were alerted.';
+    case 'scripted_urgent':
+      return 'Fixed message for an urgent request, not written by the AI. Staff were alerted.';
+    case 'scripted_guard':
+      return 'The AI’s own reply was not used; a fixed safe reply was given instead.';
+    case 'scripted_limit':
+      return 'The conversation reached its length limit.';
+    case 'scripted_booking':
+      return 'Written by the system from the saved appointment, not by the AI.';
+    default:
+      return null;
+  }
+}
 
 /** Who did it, for activity lists: the AI receptionist and the system are named as such, never as an "unknown user". */
 export function actorLabel(entry: Pick<AuditLogEntry, 'actorType' | 'actorName'>): string {

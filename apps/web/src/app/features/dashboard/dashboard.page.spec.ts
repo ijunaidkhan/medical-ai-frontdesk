@@ -40,7 +40,10 @@ describe('DashboardPage', () => {
   /** The appointments request today's card made (answered here with ppointments), if the role may see the schedule. */
   let todayRequest: TestRequest | undefined;
 
-  async function setup(role: Role, appointments: unknown[] = []) {
+  /** The tasks request of the tasks card (answered with `tasks`), if the role may see tasks. */
+  let tasksRequest: TestRequest | undefined;
+
+  async function setup(role: Role, appointments: unknown[] = [], tasks: unknown[] = []) {
     TestBed.configureTestingModule({ imports: [DashboardPage], providers: [provideRouter([]), ...httpProviders()] });
     http = TestBed.inject(HttpTestingController);
     await signIn(makeSession({ role }));
@@ -48,6 +51,8 @@ describe('DashboardPage', () => {
     await render(fixture);
     todayRequest = http.match((r) => r.url === '/api/appointments')[0];
     todayRequest?.flush(appointments);
+    tasksRequest = http.match((r) => r.url === '/api/tasks')[0];
+    tasksRequest?.flush({ items: tasks, nextCursor: null });
   }
 
   const root = () => fixture.nativeElement as HTMLElement;
@@ -142,6 +147,20 @@ describe('DashboardPage', () => {
     });
   });
 
+  describe('tasks', () => {
+    it('counts the tasks to do and the urgent ones, and links to them', async () => {
+      await setup('staff', [], [{ id: 't1', priority: 'urgent' }, { id: 't2', priority: 'normal' }, { id: 't3', priority: 'normal' }]);
+      expect(tasksRequest!.request.params.get('status')).toBe('active');
+      http.expectOne('/api/practice').flush(PRACTICE);
+      http.expectOne('/api/members').flush([]);
+      await render(fixture);
+      const card = root().querySelector('#tasks-heading')?.parentElement?.textContent?.replace(/\s+/g, ' ') ?? '';
+      expect(card).toContain('3 to do');
+      expect(card).toContain('1 urgent');
+      expect(root().querySelector('a[href="/tasks"]')).not.toBeNull();
+    });
+  });
+
   describe('today', () => {
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['Date'] });
@@ -183,13 +202,13 @@ describe('DashboardPage', () => {
       practiceRequest.flush(PRACTICE);
       others.forEach((request) => request.flush(request.request.url === '/api/members' ? [] : { items: [], nextCursor: null }));
       await render(fixture);
-      return [...(todayRequest ? ['/api/appointments'] : []), ...others.map((request) => request.request.url)].sort();
+      return [...(todayRequest ? ['/api/appointments'] : []), ...(tasksRequest ? ['/api/tasks'] : []), ...others.map((request) => request.request.url)].sort();
     };
 
     it.each<[Role, string[]]>([
-      ['owner', ['/api/appointments', '/api/audit-logs', '/api/members']],
-      ['admin', ['/api/appointments', '/api/audit-logs', '/api/members']],
-      ['staff', ['/api/appointments', '/api/members']],
+      ['owner', ['/api/appointments', '/api/audit-logs', '/api/members', '/api/tasks']],
+      ['admin', ['/api/appointments', '/api/audit-logs', '/api/members', '/api/tasks']],
+      ['staff', ['/api/appointments', '/api/members', '/api/tasks']],
       ['viewer', []],
     ])('%s asks for %j besides the practice', async (role, expected) => {
       expect(await requestedBy(role)).toEqual(expected);

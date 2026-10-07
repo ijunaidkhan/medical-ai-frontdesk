@@ -82,7 +82,7 @@ export interface UpdateTaskRequest {
   status?: TaskStatus;
 }
 
-/** Newest first. Pass `nextCursor` back as `cursor` for the following page. */
+/** Urgent tasks first, then newest first. Pass `nextCursor` back as `cursor` for the following page. */
 export interface TaskPage {
   items: Task[];
   nextCursor: string | null;

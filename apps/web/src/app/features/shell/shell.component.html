@@ -38,6 +38,12 @@
 
 <nav class="nav" aria-label="Main">
   <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
+  @if (auth.can('tasks:read')) {
+    <a routerLink="/tasks" routerLinkActive="active">Tasks</a>
+  }
+  @if (auth.can('calls:read')) {
+    <a routerLink="/conversations" routerLinkActive="active">Conversations</a>
+  }
   @if (auth.can('members:read')) {
     <a routerLink="/team" routerLinkActive="active">Team</a>
   }

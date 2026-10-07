@@ -1,0 +1,90 @@
+.summary {
+  margin: 4px 0 12px;
+}
+
+.small {
+  font-size: 0.875rem;
+}
+
+.alert {
+  margin-bottom: 8px;
+}
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.turn {
+  max-width: 44rem;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.turn.caller {
+  align-self: flex-end;
+  background: var(--brand-soft);
+}
+
+.turn.fixed {
+  border-left: 4px solid var(--brand);
+}
+
+.who {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.text {
+  white-space: pre-line;
+}
+
+.note {
+  margin-top: 6px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.blocked {
+  margin-top: 6px;
+  font-size: 0.875rem;
+}
+
+.tools {
+  max-width: 44rem;
+  font-size: 0.875rem;
+}
+
+.tools-title {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tools ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.tools .refused summary {
+  color: var(--danger);
+}
+
+pre {
+  overflow-x: auto;
+  margin: 4px 0;
+  padding: 8px;
+  background: var(--bg);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

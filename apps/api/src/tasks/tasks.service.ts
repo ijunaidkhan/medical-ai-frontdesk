@@ -3,7 +3,7 @@ import { TASK_PAGE_DEFAULT, type Task, type TaskPage, type TaskStatus } from '@f
 import { type Kysely, sql, type Transaction } from 'kysely';
 import { writeAuditLog } from '../audit/audit-log.js';
 import type { AuthContext } from '../auth/auth-context.js';
-import { decodeCursor, encodeCursor } from '../common/keyset-cursor.js';
+import { decodeCursor, encodeCursor, type Cursor } from '../common/keyset-cursor.js';
 import type { RequestMeta } from '../common/request-meta.js';
 import type { Database } from '../database/database.types.js';
 import { TenantDb } from '../tenancy/tenant-db.js';
@@ -58,6 +58,25 @@ function toTask(row: TaskRow): Task {
   };
 }
 
+/** 0 for urgent, 1 for normal: the first thing the queue is ordered by. */
+const URGENCY_RANK = sql<number>`(case when t.priority = 'urgent' then 0 else 1 end)`;
+
+/** A page position in the task queue: the urgency rank, then the usual (time, id). */
+interface TaskCursor extends Cursor {
+  rank: 0 | 1;
+}
+
+function encodeTaskCursor(cursor: TaskCursor): string {
+  return `${cursor.rank}.${encodeCursor(cursor)}`;
+}
+
+/** Null for anything that is not a position this API produced. */
+function decodeTaskCursor(value: string): TaskCursor | null {
+  const match = /^([01])\.(.+)$/.exec(value);
+  const inner = match ? decodeCursor(match[2]!) : null;
+  return match && inner ? { ...inner, rank: Number(match[1]) as 0 | 1 } : null;
+}
+
 /** Empty text means "nothing": store null, never an empty string. */
 const orNull = (value: string | null | undefined): string | null => (value === undefined || value === null || value === '' ? null : value);
 
@@ -67,7 +86,7 @@ export class TasksService {
 
   async list(auth: AuthContext, query: TaskListQuery): Promise<TaskPage> {
     const limit = query.limit ?? TASK_PAGE_DEFAULT;
-    const cursor = query.cursor === undefined ? null : decodeCursor(query.cursor);
+    const cursor = query.cursor === undefined ? null : decodeTaskCursor(query.cursor);
     if (query.cursor !== undefined && !cursor) {
       throw new BadRequestException('Invalid cursor');
     }
@@ -80,15 +99,21 @@ export class TasksService {
       if (query.assignee === 'me') select = select.where('t.assigned_to', '=', auth.userId);
       else if (query.assignee === 'unassigned') select = select.where('t.assigned_to', 'is', null);
       else if (query.assignee) select = select.where('t.assigned_to', '=', query.assignee.toLowerCase());
-      if (cursor) select = select.where(sql<boolean>`(t.created_at, t.id) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`);
-      return select.orderBy('t.created_at', 'desc').orderBy('t.id', 'desc').limit(limit + 1).execute();
+      // Urgent tasks first (a missed emergency callback is the worst outcome), then newest first. The page
+      // position carries the rank too, so paging never skips or repeats a task.
+      if (cursor) {
+        select = select.where(
+          sql<boolean>`(${URGENCY_RANK} > ${cursor.rank} or (${URGENCY_RANK} = ${cursor.rank} and (t.created_at, t.id) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)))`,
+        );
+      }
+      return select.orderBy(URGENCY_RANK).orderBy('t.created_at', 'desc').orderBy('t.id', 'desc').limit(limit + 1).execute();
     });
 
     const page = rows.slice(0, limit);
     const last = page.at(-1);
     return {
       items: page.map(toTask),
-      nextCursor: rows.length > limit && last ? encodeCursor({ at: last.created_at_text, id: last.id }) : null,
+      nextCursor: rows.length > limit && last ? encodeTaskCursor({ rank: last.priority === 'urgent' ? 0 : 1, at: last.created_at_text, id: last.id }) : null,
     };
   }
 

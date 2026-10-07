@@ -1,0 +1,44 @@
+<h1>Conversations</h1>
+<p class="muted intro">What the AI receptionist said and did at {{ auth.practice()?.name }}, newest first. Opening a conversation is recorded in the activity log.</p>
+
+@if (loadError(); as message) {
+  <p class="alert alert-error" role="alert">{{ message }}</p>
+} @else if (loading()) {
+  <p class="muted" role="status">Loading…</p>
+} @else {
+  <ul class="list">
+    @for (item of items(); track item.id) {
+      <li>
+        <a class="card row" [class.emergency]="item.escalation === 'emergency'" [routerLink]="['/conversations', item.id]">
+          <span class="when">{{ when(item.startedAt) }}</span>
+          <span class="what">
+            <strong>{{ channelLabels[item.channel] }}</strong>
+            @if (item.startedByName) {
+              <span class="muted"> by {{ item.startedByName }}</span>
+            }
+            <span class="muted"> · {{ item.turnCount }} {{ item.turnCount === 1 ? 'line' : 'lines' }}</span>
+          </span>
+          <span class="badges">
+            @if (item.escalation === 'emergency') {
+              <span class="badge badge-urgent">Emergency</span>
+            } @else if (item.escalation === 'urgent') {
+              <span class="badge badge-warn">Urgent</span>
+            }
+            @if (item.outcome) {
+              @if (item.outcome !== 'emergency') {
+                <span class="badge">{{ outcomeLabels[item.outcome] }}</span>
+              }
+            } @else {
+              <span class="badge">Still going</span>
+            }
+          </span>
+        </a>
+      </li>
+    } @empty {
+      <li class="muted empty">No conversations yet. Try the AI receptionist in the test chat.</li>
+    }
+  </ul>
+  @if (nextCursor()) {
+    <button type="button" class="btn" [disabled]="loadingMore()" (click)="loadMore()">{{ loadingMore() ? 'Loading…' : 'Load more' }}</button>
+  }
+}

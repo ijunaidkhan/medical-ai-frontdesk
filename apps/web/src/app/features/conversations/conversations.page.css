@@ -1,0 +1,50 @@
+.intro {
+  margin: 4px 0 16px;
+}
+
+.list {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-bottom: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.row:hover {
+  border-color: var(--brand);
+}
+
+.row.emergency {
+  border-left: 4px solid var(--danger);
+}
+
+.when {
+  flex: 0 0 11rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.what {
+  flex: 1 1 220px;
+}
+
+.badges {
+  display: flex;
+  gap: 6px;
+}
+
+.badge-urgent {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.empty {
+  padding: 8px 0;
+}

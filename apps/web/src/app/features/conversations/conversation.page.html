@@ -1,0 +1,74 @@
+<p><a routerLink="/conversations">← All conversations</a></p>
+
+@if (loadError(); as message) {
+  <p class="alert alert-error" role="alert">{{ message }}</p>
+} @else if (loading()) {
+  <p class="muted" role="status">Loading…</p>
+} @else if (conversation(); as c) {
+  <h1>{{ channelLabels[c.channel] }}, {{ when(c.startedAt) }}</h1>
+  <p class="muted summary">
+    @if (c.startedByName) {
+      Run by {{ c.startedByName }} ·
+    }
+    @if (c.outcome) {
+      {{ outcomeLabels[c.outcome] }}
+      @if (c.endedAt) {
+        · ended {{ when(c.endedAt) }}
+      }
+    } @else {
+      Still going
+    }
+    @if (c.handoffTo) {
+      · handed to {{ c.handoffTo.label }}
+    }
+    @if (c.model) {
+      · AI model: {{ c.model }}
+    }
+  </p>
+  @if (c.escalation === 'emergency') {
+    <p class="alert alert-error" role="status">This conversation involved an emergency: the caller was given the practice’s emergency message and the team was alerted.</p>
+  } @else if (c.escalation === 'urgent') {
+    <p class="alert" role="status">This conversation was urgent: the team was alerted.</p>
+  }
+  <p class="muted small">Opening this conversation was recorded in the activity log. It may contain personal details: do not copy them elsewhere.</p>
+
+  <ol class="transcript">
+    @for (line of lines(); track line.turn.seq) {
+      @if (line.tools.length > 0) {
+        <li class="tools">
+          <p class="tools-title">What the AI did:</p>
+          <ul>
+            @for (call of line.tools; track $index) {
+              <li [class.refused]="call.status !== 'ok'">
+                <details>
+                  <summary>{{ toolLabel(call.tool) }}: {{ toolStatus(call) }}</summary>
+                  <p class="muted small">What the AI asked for</p>
+                  <pre>{{ json(call.arguments) }}</pre>
+                  <p class="muted small">What the system answered</p>
+                  <pre>{{ json(call.result) }}</pre>
+                </details>
+              </li>
+            }
+          </ul>
+        </li>
+      }
+      <li class="turn" [class.caller]="line.turn.speaker === 'caller'" [class.ai]="line.turn.speaker !== 'caller'" [class.fixed]="line.note !== null">
+        <span class="who">{{ line.turn.speaker === 'caller' ? 'Caller' : 'AI receptionist' }}</span>
+        <p class="text">{{ line.turn.text }}</p>
+        @if (line.note) {
+          <p class="note">{{ line.note }}</p>
+        }
+        @if (line.turn.guardReason) {
+          <p class="note">Replaced because {{ guardReasonLabel(line.turn.guardReason) }}.</p>
+        }
+        @if (line.turn.blockedText) {
+          <details class="blocked">
+            <summary>What the AI had written (never shown to the caller)</summary>
+            <p>{{ line.turn.blockedText }}</p>
+          </details>
+        }
+        <span class="muted small">{{ when(line.turn.at) }}</span>
+      </li>
+    }
+  </ol>
+}

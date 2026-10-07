@@ -16,7 +16,7 @@ Status: **approved 2026-09-30, in progress.** M2a is being built in small steps;
 | 5a. Web: AI settings screen (messages, hours, urgent handling, transfer numbers, on/off) | **done** (`/ai`) |
 | 5b. Web: knowledge screen (write, approve, archive, "what would the AI find?" search) | **done** (`/knowledge`) |
 | 5e. Web: test chat | **done** (`/test-chat`) |
-| 5c–5d. Web: staff tasks, conversation review | next |
+| 5c–5d. Web: staff tasks (urgent first), conversation review with labelled transcripts and tool calls | **done** (`/tasks`, `/conversations`) |
 | 6a. Real model adapter (Claude via Anthropic's API), configuration, tests against a stand-in server | **done**; needs the operator's key in `.env` to use |
 | 6b. Conversation test set run against the real model (emergency phrases, diagnosis and dosage requests, unanswerable questions, prompt injection, false booking claims) | needs the operator's key; run once the test chat screen exists |
 

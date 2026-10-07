@@ -219,11 +219,15 @@ describe('staff tasks', () => {
       await as(app, token.staff).get(`/api/tasks?${query}`).expect(400);
     });
 
-    it.each([1, 2, 3, 100])('walks the whole queue in pages of %i: every task once, in the same order as the database', async (limit) => {
+    it.each([1, 2, 3, 100])('walks the whole queue in pages of %i: every task once, urgent first, then newest first', async (limit) => {
+      // Make sure both urgent and normal tasks are in the queue, including two urgent ones at the same instant.
+      const pair = await Promise.all([create({ type: 'callback', title: `U page ${limit} a`, priority: 'urgent' }), create({ type: 'callback', title: `U page ${limit} b`, priority: 'urgent' })]);
+      await owner.updateTable('staff_tasks').set({ created_at: new Date('2026-01-01T00:00:00Z') }).where('id', 'in', pair.map((t) => t.id)).execute();
       const expected = await owner
         .selectFrom('staff_tasks')
         .select('id')
         .where('practice_id', '=', alpha.practiceId)
+        .orderBy(sql`case when priority = 'urgent' then 0 else 1 end`)
         .orderBy('created_at', 'desc')
         .orderBy('id', 'desc')
         .execute();
@@ -239,6 +243,20 @@ describe('staff tasks', () => {
       } while (cursor);
 
       expect(seen).toEqual(expected.map((r) => r.id));
+    });
+
+    it('lists urgent tasks before newer normal ones', async () => {
+      const urgent = await create({ type: 'callback', title: 'Old but urgent', priority: 'urgent' });
+      await owner.updateTable('staff_tasks').set({ created_at: new Date('2020-01-01T00:00:00Z') }).where('id', '=', urgent.id).execute();
+      const normal = await create({ type: 'message', title: 'New and normal' });
+      const order = (await list('?limit=200')).items.map((t) => t.id);
+      expect(order.indexOf(urgent.id)).toBeLessThan(order.indexOf(normal.id));
+    });
+
+    it('refuses a page position from another list or a tampered one', async () => {
+      for (const cursor of ['2.abc', '0.', 'x.y', encodeURIComponent('0.' + Buffer.from('["nope","x"]').toString('base64url'))]) {
+        await as(app, token.staff).get(`/api/tasks?cursor=${cursor}`).expect(400);
+      }
     });
 
     it('does not skip or repeat tasks that were created at the same instant', async () => {
