@@ -133,9 +133,35 @@ describe('the AI receptionist with the Ollama adapter', () => {
     expect(JSON.stringify(seen[1]!.body.messages)).toContain('call_text_0'); // the model is told the result of its request
   });
 
-  it('a garbled tool request is never read out to the caller: the model is told, tries once more, and if it is still code the safe line is said', async () => {
+  it('a tool request with the usual slip (the colon after "parameters" left out) is repaired and carried out, as llama writes it in real chats', async () => {
     const { conversationId } = await start();
-    const garbled = '{"name":"create_staff_task","parameters{"type":"string","contactName":"","title":"Appointment Booking","type":"other"}}';
+    answers.push(
+      said('{"name":"create_staff_task","parameters{"type":"string","title":"Wants an appointment","contactName":"Zara Malik","contactPhone":"+14155550177","type":"callback"}}'),
+      said('Thank you Zara, I have passed your details to our team.'),
+    );
+    const reply = await send(conversationId, 'I want to book an appointment. My name is Zara Malik, phone +1 415 555 0177');
+    expect(reply).toMatchObject({ reply: 'Thank you Zara, I have passed your details to our team.', source: 'model' });
+    expect(reply.createdTaskIds).toHaveLength(1);
+    expect((await detail(conversationId)).toolCalls).toMatchObject([{ tool: 'create_staff_task', status: 'ok' }]);
+  });
+
+  it('a repaired request is checked like any other: a phone number the caller never said is refused, nothing is saved, and the model is told', async () => {
+    const { conversationId } = await start();
+    answers.push(
+      said('{"name":"create_staff_task","parameters{"title":"Wants an appointment","type":"callback","contactName":"","contactPhone":"+1234567890"}}'),
+      said('Could you tell me a phone number we can call you back on?'),
+    );
+    const reply = await send(conversationId, 'I want to book an appointment');
+    expect(reply).toMatchObject({ reply: 'Could you tell me a phone number we can call you back on?', source: 'model' });
+    expect(reply.createdTaskIds).toEqual([]);
+    const d = await detail(conversationId);
+    expect(d.toolCalls).toMatchObject([{ tool: 'create_staff_task', status: 'rejected' }]);
+    expect(JSON.stringify(seen[1]!.body.messages)).toContain('is not what the caller said');
+  });
+
+  it('a tool request cut short is never read out to the caller: the model is told, tries once more, and if it is still code the safe line is said', async () => {
+    const { conversationId } = await start();
+    const garbled = '{"name":"create_staff_task","parameters{"}}';
     answers.push(said(garbled), said(garbled));
     const reply = await send(conversationId, 'i need and appointment booking');
     expect(reply).toMatchObject({ reply: SAFE_FALLBACK_REPLY, source: 'scripted_guard' });

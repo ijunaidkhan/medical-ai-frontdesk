@@ -139,22 +139,32 @@ export function toWire(request: ModelRequest): WireMessage[] {
 const THINKING = /<think>[\s\S]*?<\/think>/g;
 
 /**
+ * The one slip small Llama models make when they write a tool request out by hand: the closing quote and
+ * colon after the name of the arguments are left out ("parameters{" instead of "parameters":{).
+ */
+const MISSING_COLON = /"(parameters|arguments|args)"?\s*\{/;
+
+function parseObject(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Small models often write a tool request as plain text, for example
  * {"name": "create_staff_task", "parameters": {...}}, instead of using the tool
  * mechanism. When the WHOLE reply is exactly one well-formed request for a tool that
  * was offered in this turn, it is treated as that tool request (the backend still
- * validates it like any other). Anything else, including malformed JSON, is not
- * recovered: it stays text, and the reply checker keeps it from the caller.
+ * validates it like any other). The single slip described at MISSING_COLON is repaired first.
+ * Anything else, including any other malformed JSON, is not recovered: it stays text, and the
+ * reply checker keeps it from the caller.
  */
 export function recoverTextToolCall(text: string, offered: readonly string[]): ModelToolCall | null {
   const bare = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   if (!bare.startsWith('{') || !bare.endsWith('}')) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bare);
-  } catch {
-    return null;
-  }
+  const parsed = parseObject(bare) ?? parseObject(bare.replace(MISSING_COLON, '"$1":{'));
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
   const { name, parameters, arguments: args, args: shortArgs } = parsed as Record<string, unknown>;
   if (typeof name !== 'string' || !offered.includes(name)) return null;

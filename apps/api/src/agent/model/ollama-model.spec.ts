@@ -172,8 +172,39 @@ describe('OllamaModel', () => {
         expect(asText('  \n {"name":"end_conversation"}  ').toolCalls[0]).toMatchObject({ name: 'end_conversation', arguments: {} });
       });
 
+      describe('the one slip llama makes: the colon after "parameters" is left out (as in real chats)', () => {
+        it('is repaired, and the last of two "type" entries wins (the first is the model copying the schema)', () => {
+          const result = asText('{"name":"create_staff_task","parameters{"type":"string","details":"Wants an appointment","contactName":"Zara Malik","contactPhone":"+14155550177","type":"callback"}}');
+          expect(result).toEqual({
+            text: '',
+            toolCalls: [
+              { id: 'call_text_0', name: 'create_staff_task', arguments: { type: 'callback', details: 'Wants an appointment', contactName: 'Zara Malik', contactPhone: '+14155550177' } },
+            ],
+          });
+        });
+
+        it.each([
+          ['"parameters"{ (only the colon missing)', '{"name":"search_knowledge","parameters"{"question":"parking"}}'],
+          ['"arguments{', '{"name":"search_knowledge","arguments{"question":"parking"}}'],
+          ['"args {', '{"name":"search_knowledge","args {"question":"parking"}}'],
+        ])('also with %s', (_name, content) => {
+          expect(asText(content).toolCalls).toMatchObject([{ name: 'search_knowledge', arguments: { question: 'parking' } }]);
+        });
+
+        it('is still not recovered when the request is cut short (nothing is guessed)', () => {
+          const cut = '{"name":"create_staff_task","parameters{"}}';
+          expect(asText(cut)).toEqual({ text: cut, toolCalls: [] });
+        });
+
+        it('is never repaired into a tool that was not offered, or with text around it', () => {
+          expect(asText('{"name":"request_human_handoff","parameters{"reason":"x"}}').toolCalls).toEqual([]);
+          expect(asText('Sure! {"name":"end_conversation","parameters{}}').toolCalls).toEqual([]);
+        });
+      });
+
       it.each([
-        ['malformed JSON (as in a real chat)', '{"name":"create_staff_task","parameters{"type":"string","title":"x"}}'],
+        ['malformed JSON of any other kind (a missing comma)', '{"name":"create_staff_task","parameters":{"type":"callback" "title":"x"}}'],
+        ['malformed JSON with the colon present but the brackets wrong', '{"name":"create_staff_task","parameters":{"type":"callback"}'],
         ['a tool that was not offered this turn', '{"name":"request_human_handoff","parameters":{}}'],
         ['an unknown tool', '{"name":"delete_everything","parameters":{}}'],
         ['text around the JSON', 'Sure! {"name":"end_conversation","parameters":{}}'],

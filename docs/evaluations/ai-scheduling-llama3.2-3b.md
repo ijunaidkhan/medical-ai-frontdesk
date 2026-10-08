@@ -42,6 +42,8 @@ The changes are in the backend, so they help any model and loosen no safety rule
 | Lost track of steps after identifying the caller | A successful identity check now reads the caller's appointments at once (two fewer steps). Appointment codes stay the same for the whole conversation. |
 | Searched for a visit type called "move" | Times for a move can be searched by the appointment's code (M1); an unknown visit type is refused with the steps for booking and for moving. |
 | Ignored a principle-style instruction list | Instructions rewritten as numbered steps for booking and for cancelling or moving. |
+| Wrote the tool request out as text with one slip (the colon after `parameters` left out) | The adapter repairs exactly that slip and carries the request out; it is validated like any other tool call. Anything else malformed stays text and never reaches the caller. |
+| Passed a made-up phone number (`+1234567890`) in a message for staff | A phone number saved in a message must be one the caller said, as for patients. |
 | Tried to book before any time was offered | The refusal says exactly what to do next and names the kinds of visit. |
 
 ## Known limits with this model

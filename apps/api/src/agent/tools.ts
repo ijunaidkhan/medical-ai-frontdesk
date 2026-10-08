@@ -14,6 +14,7 @@ import { stripControl } from './sanitize.js';
 import { callerIsFinished } from './farewell.js';
 import { chooseTransferTarget } from './safety/escalation.js';
 import { SchedulingTools } from './scheduling-tools.js';
+import { callerSaidPhone, phoneNotSaidMessage } from './spoken-phone.js';
 
 /** A conversation may create at most this many tasks through the receptionist's tool (escalation tasks are separate). */
 export const MAX_TASKS_PER_CONVERSATION = 3;
@@ -212,6 +213,11 @@ export class AgentTools {
         status: 'rejected',
         result: { error: 'A phone number is needed so the team can call the caller back. Ask the caller for their name and a phone number (with the country code) first, then try again.' },
       };
+    }
+    // The number must be one the caller said: a made-up or mistyped number would send staff to call nobody.
+    const phone = pickString(args, 'contactPhone')!;
+    if (!(await callerSaidPhone(trx, runtime.conversationId, phone))) {
+      return { status: 'rejected', result: { error: phoneNotSaidMessage(phone) } };
     }
     // Only these fields are read; the priority is always normal (urgent tasks come from the safety layer, never from the model).
     const dto = plainToInstance(CreateTaskDto, {

@@ -253,11 +253,46 @@ describe('the AI receptionist (text test chat)', () => {
       const { conversationId } = await start();
       const task = (n: number) => ({ id: `t${n}`, name: 'create_staff_task', arguments: { type: 'message', title: `Message ${n}`, contactPhone: '+14155550123' } });
       script({ text: '', toolCalls: [task(1), task(2), task(3), task(4), { id: 'extra', name: 'get_practice_info', arguments: {} }] }, say('The team has your details.'));
-      const reply = await send(conversationId, 'leave four messages please');
+      const reply = await send(conversationId, 'leave four messages please, my number is +1 415 555 0123');
       expect(reply.createdTaskIds).toHaveLength(3);
       expect(await tasksOf(conversationId)).toHaveLength(3);
       const calls = (await detail(conversationId)).toolCalls;
       expect(calls.map((call) => call.status)).toEqual(['ok', 'ok', 'ok', 'rejected', 'rejected']); // fourth task: limit; fifth call: per-turn limit
+    });
+
+    it('refuses a message whose phone number the caller never said (a made-up or mistyped number would send staff to call nobody)', async () => {
+      const { conversationId } = await start();
+      script(callTool('create_staff_task', { type: 'message', title: 'Leave a message', contactPhone: '+1234567890' }), say('May I have a phone number to call you back on?'));
+      const reply = await send(conversationId, 'Please leave a message for the team');
+      expect(reply.createdTaskIds).toEqual([]);
+      expect(await tasksOf(conversationId)).toEqual([]);
+      expect((await detail(conversationId)).toolCalls).toMatchObject([{ tool: 'create_staff_task', status: 'rejected' }]);
+      expect(JSON.stringify(model.requests[1]!.messages.at(-1))).toContain('is not what the caller said'); // the model is told why
+    });
+
+    it('a number the AI itself said (such as the clinic’s own) does not count as the caller’s', async () => {
+      const { conversationId } = await start();
+      script(say('You can reach the clinic on +1 415 555 0199.'));
+      await send(conversationId, 'what is your number?');
+      script(callTool('create_staff_task', { type: 'message', title: 'Leave a message', contactPhone: '+14155550199' }), say('May I have your own number?'));
+      await send(conversationId, 'please leave a message for the team');
+      expect(await tasksOf(conversationId)).toEqual([]);
+    });
+
+    it('refuses a message whose phone number has one digit different from what the caller said', async () => {
+      const { conversationId } = await start();
+      script(callTool('create_staff_task', { type: 'message', title: 'Leave a message', contactPhone: '+14155550124' }), say('Could you repeat your number?'));
+      await send(conversationId, 'Tell them to call me on +1 415 555 0123');
+      expect(await tasksOf(conversationId)).toEqual([]);
+    });
+
+    it('accepts a number said in an earlier message, or said in words, as on a phone call', async () => {
+      const { conversationId } = await start();
+      script(say('Thank you. What would you like me to pass on?'));
+      await send(conversationId, 'My number is four one five, five five five, oh one two three.');
+      script(callTool('create_staff_task', { type: 'message', title: 'Leave a message', contactPhone: '+14155550123' }), say('I have passed that on.'));
+      const reply = await send(conversationId, 'Please ask them to call me about my results.');
+      expect(reply.createdTaskIds).toHaveLength(1);
     });
 
     it('a tool the model invents is refused and recorded', async () => {
@@ -282,7 +317,7 @@ describe('the AI receptionist (text test chat)', () => {
     it('ends the conversation when the model asks to, with the right outcome', async () => {
       const { conversationId } = await start();
       script(callTool('create_staff_task', { type: 'message', title: 'Leave a message', contactPhone: '+14155550123' }), callTool('end_conversation', {}), say('Goodbye.'));
-      const reply = await send(conversationId, 'Just tell them I called. Bye.');
+      const reply = await send(conversationId, 'Just tell them I called, on +1 415 555 0123. Bye.');
       expect(reply).toMatchObject({ status: 'completed', outcome: 'message_taken' });
       const d = await detail(conversationId);
       expect(d.endedAt).not.toBeNull();
