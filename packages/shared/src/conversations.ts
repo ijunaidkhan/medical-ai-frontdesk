@@ -84,6 +84,15 @@ export interface StartConversationResponse {
   greeting: string;
 }
 
+/**
+ * Returned when a web-phone call starts: what the AI says first, the id the browser must announce
+ * when its voice session opens, and the one-use address of that session (a path on this server).
+ */
+export interface StartWebCallResponse extends StartConversationResponse {
+  callSid: string;
+  sessionPath: string;
+}
+
 export interface SendMessageRequest {
   text: string;
 }

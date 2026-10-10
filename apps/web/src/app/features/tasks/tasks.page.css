@@ -93,6 +93,11 @@ textarea.input {
   margin: 4px 0 0;
 }
 
+/* The birth date sits between the name and the number, with a gap on each side. */
+.contact .muted {
+  margin: 0 8px;
+}
+
 .task-actions {
   margin-top: 8px;
   align-items: center;

@@ -27,6 +27,13 @@ export const CANCEL_MIN_HOURS_MAX = 720;
 export const TIME_FORMATS = ['12h', '24h'] as const;
 export type TimeFormat = (typeof TIME_FORMATS)[number];
 
+/**
+ * What identifies a caller who wants to hear about, cancel or move an appointment: name and date of birth,
+ * or all three of name, date of birth and phone number (the stricter check).
+ */
+export const IDENTITY_CHECKS = ['name_dob', 'name_dob_phone'] as const;
+export type IdentityCheck = (typeof IDENTITY_CHECKS)[number];
+
 /** Failed identity checks per hour, across the whole practice, after which the AI stops identifying callers for that hour. */
 export const IDENTITY_FAILURE_CAP_MIN = 5;
 export const IDENTITY_FAILURE_CAP_MAX = 1000;
@@ -46,6 +53,8 @@ export interface SchedulingSettings {
   timeFormat: TimeFormat;
   /** After this many failed identity checks in an hour (all callers together) the AI stops identifying callers until the hour has passed. */
   identityFailureCapPerHour: number;
+  /** What the AI needs from a caller before it tells them about their own appointments. */
+  identityCheck: IdentityCheck;
   updatedAt: string | null;
 }
 
@@ -57,6 +66,7 @@ export const SCHEDULING_DEFAULTS: Omit<SchedulingSettings, 'updatedAt'> = {
   aiBookingEnabled: false,
   timeFormat: '12h',
   identityFailureCapPerHour: 30,
+  identityCheck: 'name_dob',
 };
 
 export type UpdateSchedulingSettingsRequest = Partial<Omit<SchedulingSettings, 'updatedAt'>>;

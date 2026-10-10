@@ -100,6 +100,7 @@ describe('AI receptionist settings', () => {
         urgentAction: 'urgent_task',
         urgentTransferTargetId: null,
         extraUrgentPhrases: [],
+        messageContact: 'name_dob',
         updatedAt: null,
         ready: false,
       });
@@ -291,6 +292,38 @@ describe('AI receptionist settings', () => {
 
       await save({ urgentAction: 'urgent_task', urgentTransferTargetId: null }).expect(200); // stop using it
       await as(app, token.admin).patch(`/api/ai/transfer-targets/${desk.id}`, { active: false }).expect(200); // now it is free
+    });
+  });
+
+  describe('what the AI asks for when taking a message', () => {
+    it('is name and date of birth until a practice chooses name and phone number, and the change is audited by field name', async () => {
+      expect((await settings()).messageContact).toBe('name_dob');
+      const saved = (await save({ messageContact: 'name_phone' }).expect(200)).body as AiSettings;
+      expect(saved.messageContact).toBe('name_phone');
+      expect((await storedSettings())?.message_contact).toBe('name_phone');
+      expect((await audit('ai.settings_updated')).at(-1)!.metadata).toEqual({ fields: ['messageContact'] });
+      await save({ messageContact: 'name_phone' }).expect(400); // nothing changed
+      expect(((await save({ messageContact: 'name_dob' }).expect(200)).body as AiSettings).messageContact).toBe('name_dob');
+    });
+
+    it('cannot be changed by staff or viewers, or seen changed in another practice', async () => {
+      await save({ messageContact: 'name_phone' }, token.staff).expect(403);
+      await save({ messageContact: 'name_phone' }, token.viewer).expect(403);
+      await save({ messageContact: 'name_phone' }).expect(200);
+      expect((await settings(betaToken)).messageContact).toBe('name_dob'); // beta is unaffected
+      await save({ messageContact: 'name_dob' }).expect(200);
+    });
+
+    it.each([
+      ['a choice that does not exist', { messageContact: 'email' }],
+      ['a choice given as a number', { messageContact: 1 }],
+      ['a choice given as null', { messageContact: null }],
+    ])('rejects %s', async (_label, body) => {
+      await save(body).expect(400);
+    });
+
+    it('is guarded by the database too: only the two choices are stored', async () => {
+      await expect(owner.updateTable('ai_settings').set({ message_contact: 'sms' as never }).where('practice_id', '=', alpha.practiceId).execute()).rejects.toThrow(/check constraint/);
     });
   });
 

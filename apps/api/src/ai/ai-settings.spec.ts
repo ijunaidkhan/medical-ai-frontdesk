@@ -1,6 +1,7 @@
 import {
   AI_DISCLOSURE,
   aiReadinessProblems,
+  chatStartProblems,
   composeGreeting,
   describeBusinessHours,
   emptyBusinessHours,
@@ -247,5 +248,19 @@ describe('aiReadinessProblems', () => {
   it('lists every problem at once', () => {
     const empty: AiConfiguration = { ...ready, greeting: '', emergencyMessage: '', crisisMessage: '', businessHours: emptyBusinessHours(), urgentAction: 'transfer', afterHoursAction: 'transfer' };
     expect(aiReadinessProblems(empty, [])).toHaveLength(6);
+  });
+
+  describe('chatStartProblems (what a test chat or the web phone needs)', () => {
+    it('asks only for the greeting and the two safety messages, not hours or transfer numbers', () => {
+      const noHoursNoNumber: AiConfiguration = { ...ready, businessHours: emptyBusinessHours(), urgentAction: 'transfer' };
+      expect(aiReadinessProblems(noHoursNoNumber, [])).not.toEqual([]);
+      expect(chatStartProblems(noHoursNoNumber)).toEqual([]);
+    });
+
+    it('lists what is missing, in the same words as the readiness check', () => {
+      const missing = chatStartProblems({ greeting: ' ', emergencyMessage: '911', crisisMessage: '' });
+      expect(missing).toHaveLength(3);
+      expect(aiReadinessProblems({ ...ready, greeting: ' ', emergencyMessage: '911', crisisMessage: '' }, active).slice(0, 3)).toEqual(missing);
+    });
   });
 });

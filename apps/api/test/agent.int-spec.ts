@@ -8,6 +8,7 @@ import {
   type StartConversationResponse,
   type TransferTarget,
 } from '@frontdesk/shared';
+import { sql } from 'kysely';
 import { LIMIT_REPLY } from '../src/agent/agent.service.js';
 import { ModelUnavailableError } from '../src/agent/model/language-model.js';
 import { callTool, say, ScriptedModel, type ScriptedStep } from '../src/agent/model/scripted-model.js';
@@ -67,7 +68,7 @@ describe('the AI receptionist (text test chat)', () => {
 
     // Alpha is fully set up, open all day, urgent calls become tasks. Beta has written nothing.
     await as(app, token.admin)
-      .patch('/api/ai/settings', { greeting: 'Thank you for calling Alpha Clinic.', emergencyMessage: EMERGENCY, crisisMessage: CRISIS, businessHours: ALL_DAY })
+      .patch('/api/ai/settings', { greeting: 'Thank you for calling Alpha Clinic.', emergencyMessage: EMERGENCY, crisisMessage: CRISIS, messageContact: 'name_phone', businessHours: ALL_DAY })
       .expect(200);
   });
 
@@ -225,6 +226,18 @@ describe('the AI receptionist (text test chat)', () => {
       expect((await detail(conversationId)).toolCalls).toMatchObject([{ tool: 'create_staff_task', status: 'ok' }]);
     });
 
+    it.each([
+      ['+92 33357 50966', '+923335750966'],
+      ['+1 (415) 555-0133', '+14155550133'],
+      ['+92.333.5750966', '+923335750966'],
+    ])('saves a message when the model writes the number as "%s" (people and speech recognition add spaces and dashes)', async (written, stored) => {
+      const { conversationId } = await start();
+      script(callTool('create_staff_task', { type: 'callback', title: 'Wants an appointment', contactName: 'Junaid', contactPhone: written }), say('I have passed that on.'));
+      const reply = await send(conversationId, `My name is Junaid and my number is ${written}.`);
+      expect(reply.createdTaskIds).toHaveLength(1);
+      expect(await tasksOf(conversationId)).toMatchObject([{ contact_phone: stored }]);
+    });
+
     it('refuses a badly formed task and records the refusal; nothing is saved', async () => {
       const { conversationId } = await start();
       script(callTool('create_staff_task', { type: 'callback', title: 'x', contactPhone: '555-1234' }), say('Could you give me the number including the country code?'));
@@ -233,6 +246,23 @@ describe('the AI receptionist (text test chat)', () => {
       expect(await tasksOf(conversationId)).toHaveLength(0);
       expect((await detail(conversationId)).toolCalls).toMatchObject([{ tool: 'create_staff_task', status: 'rejected' }]);
       expect(JSON.stringify(model.requests[1]!.messages.at(-1))).toContain('international format');
+    });
+
+    it('tells the model to fix a badly written number itself, so it does not make the caller confirm it again and again', async () => {
+      const { conversationId } = await start();
+      script(callTool('create_staff_task', { type: 'callback', title: 'Wants an appointment', contactPhone: '923335750966' }), say('I have noted your number.'));
+      await send(conversationId, 'My number is 92 33357 50966, please call me');
+      expect(await tasksOf(conversationId)).toHaveLength(0); // no plus sign: refused
+      const told = JSON.stringify(model.requests[1]!.messages.at(-1));
+      expect(told).toContain('Write the number yourself');
+      expect(told).toContain('never ask the caller to say it differently');
+    });
+
+    it('does not add that advice when the refusal has nothing to do with the phone number', async () => {
+      const { conversationId } = await start();
+      script(callTool('create_staff_task', { type: 'string', title: 'Wants an appointment', contactPhone: '+14155550123' }), say('Let me try again.'));
+      await send(conversationId, 'Please ask them to call me on +14155550123');
+      expect(JSON.stringify(model.requests[1]!.messages.at(-1))).not.toContain('Write the number yourself');
     });
 
     it('refuses to save a message with no phone number, and tells the model to ask for one (nobody could call back)', async () => {
@@ -679,6 +709,205 @@ describe('the AI receptionist (text test chat)', () => {
       const { conversationId } = await start();
       const d = await detail(conversationId);
       expect(d).toMatchObject({ startedByName: 'Member admin@alpha.test', model: 'scripted' });
+    });
+  });
+
+  describe('taking a message by name and date of birth (the default)', () => {
+    const seedPatient = (practiceId: string, firstName: string, lastName: string, dateOfBirth: string, phone: string) =>
+      owner.insertInto('patients').values({ practice_id: practiceId, first_name: firstName, last_name: lastName, date_of_birth: dateOfBirth, phone, created_by_type: 'ai', created_by: null }).execute();
+    const task = (extra: Record<string, unknown> = {}) =>
+      callTool('create_staff_task', { type: 'callback', title: 'Wants an appointment', contactName: 'Sara Ali', contactDateOfBirth: '1991-02-03', ...extra });
+    const saved = (conversationId: string) =>
+      owner
+        .selectFrom('staff_tasks')
+        .select(['contact_name', 'contact_phone', sql<string | null>`contact_date_of_birth::text`.as('birth')])
+        .where('conversation_id', '=', conversationId)
+        .where('priority', '=', 'normal')
+        .execute();
+    /** What the model was told after the tool ran, in the first model call that came after its tool request. */
+    const toldAfterTool = () => JSON.stringify(model.requests[1]!.messages.at(-1));
+    const SARA = 'Hi, I am Sara Ali, born 3 February 1991. Please ask someone to call me back about an appointment.';
+
+    beforeAll(async () => {
+      await as(app, token.admin).patch('/api/ai/settings', { messageContact: 'name_dob' }).expect(200);
+      await seedPatient(alpha.practiceId, 'Sara', 'Ali', '1991-02-03', '+14155550111');
+      await seedPatient(alpha.practiceId, 'Omar', 'Khan', '1980-05-05', '+14155550201');
+      await seedPatient(alpha.practiceId, 'Omar', 'Khan', '1980-05-05', '+14155550202'); // the same name and birthday, another number
+      await seedPatient(beta.practiceId, 'Beth', 'Beta', '1992-04-04', '+14155550301'); // another practice's patient
+    });
+
+    afterAll(async () => {
+      await as(app, token.admin).patch('/api/ai/settings', { messageContact: 'name_phone' }).expect(200);
+    });
+
+    it('offers the model name and date of birth, tells it not to ask for a phone number, and tells it what the number is for', async () => {
+      const { conversationId } = await start();
+      script(say('Hello, how can I help?'));
+      await send(conversationId, 'hello');
+      const request = model.requests[0]!;
+      const tool = request.tools.find((candidate) => candidate.name === 'create_staff_task')!;
+      expect(tool.parameters).toMatchObject({ required: ['type', 'title', 'contactName', 'contactDateOfBirth'] });
+      expect(JSON.stringify(tool.parameters)).toContain('Only when the system has asked for a phone number');
+      expect(tool.description).toContain('only when the caller asks to leave a message or needs something you cannot do yourself');
+      expect(request.system).toContain('Do not ask for a phone number');
+    });
+
+    it('finds the number to call back on the patient record, saves the birth date, and never tells the model the number', async () => {
+      const { conversationId } = await start();
+      script(task({ details: 'Would like an appointment' }), say('I have passed that on, we will call you on the number we have.'));
+      const reply = await send(conversationId, SARA);
+      expect(reply.createdTaskIds).toHaveLength(1);
+      expect(await saved(conversationId)).toEqual([{ contact_name: 'Sara Ali', contact_phone: '+14155550111', birth: '1991-02-03' }]);
+      expect(toldAfterTool()).toContain('number the practice has on file');
+      expect(toldAfterTool()).not.toContain('4155550111');
+      expect((await detail(conversationId)).toolCalls).toMatchObject([{ tool: 'create_staff_task', status: 'ok' }]);
+      expect(JSON.stringify((await detail(conversationId)).toolCalls)).not.toContain('4155550111'); // nor does the record of the call show it
+    });
+
+    it('matches the name without regard to capital letters or extra spaces', async () => {
+      const { conversationId } = await start();
+      script(task({ contactName: '  sara   ALI ' }), say('Passed on.'));
+      await send(conversationId, SARA);
+      expect(await saved(conversationId)).toMatchObject([{ contact_phone: '+14155550111' }]);
+    });
+
+    it('uses the number the caller chooses to give instead of the one on file, when they said it', async () => {
+      const { conversationId } = await start();
+      script(task({ contactPhone: '+1 415 555 0199' }), say('Passed on.'));
+      await send(conversationId, `${SARA} Please use +1 415 555 0199 instead.`);
+      expect(await saved(conversationId)).toMatchObject([{ contact_phone: '+14155550199', birth: '1991-02-03' }]);
+    });
+
+    it('refuses a number the caller never said, even when a patient record would have supplied one', async () => {
+      const { conversationId } = await start();
+      script(task({ contactPhone: '+14155550123' }), say('Could you repeat your number?'));
+      await send(conversationId, SARA);
+      expect(await saved(conversationId)).toEqual([]);
+      expect(toldAfterTool()).toContain('is not what the caller said');
+    });
+
+    it('with nobody on file and no caller ID (a text chat has none), asks the model to ask for a number, and saves it once given', async () => {
+      const { conversationId } = await start();
+      script(task({ contactName: 'Nadia Rahman', contactDateOfBirth: '1990-01-01' }), say('May I have a number to call you back on?'));
+      const first = await send(conversationId, 'I am Nadia Rahman, born 1 January 1990. Please call me back.');
+      expect(first.createdTaskIds).toEqual([]);
+      expect(await saved(conversationId)).toEqual([]);
+      expect(toldAfterTool()).toContain('There is no number to call this caller back on');
+
+      script(task({ contactName: 'Nadia Rahman', contactDateOfBirth: '1990-01-01', contactPhone: '+92 333 5750966' }), say('Thank you, passed on.'));
+      const second = await send(conversationId, 'My number is +92 333 5750966');
+      expect(second.createdTaskIds).toHaveLength(1);
+      expect(await saved(conversationId)).toEqual([{ contact_name: 'Nadia Rahman', contact_phone: '+923335750966', birth: '1990-01-01' }]);
+    });
+
+    it('uses a number the caller already said in full (with the country code) rather than asking again, when nothing else is known', async () => {
+      const { conversationId } = await start();
+      script(task({ contactName: 'Nadia Rahman', contactDateOfBirth: '1990-01-01' }), say('Passed on.'));
+      const reply = await send(conversationId, 'I am Nadia Rahman, born 1 January 1990, my number is +92 333 5750966. Please call me back.');
+      expect(reply.createdTaskIds).toHaveLength(1);
+      expect(await saved(conversationId)).toEqual([{ contact_name: 'Nadia Rahman', contact_phone: '+923335750966', birth: '1990-01-01' }]);
+      expect(toldAfterTool()).toContain('number they gave');
+      expect(toldAfterTool()).not.toContain('5750966');
+    });
+
+    it('does not pick between two different numbers the caller said, or use one without a country code: it asks', async () => {
+      for (const said of ['call +1 415 555 0177 or +1 415 555 0188', 'call me on 415 555 0177']) {
+        const { conversationId } = await start();
+        script(task({ contactName: 'Nadia Rahman', contactDateOfBirth: '1990-01-01' }), say('Which number should we use?'));
+        await send(conversationId, `I am Nadia Rahman, born 1 January 1990, ${said}.`);
+        expect(await saved(conversationId)).toEqual([]);
+        expect(toldAfterTool()).toContain('There is no number to call this caller back on');
+      }
+    });
+
+    it('does not guess when two patients share a name and birthday: the caller is asked for a number', async () => {
+      const { conversationId } = await start();
+      script(task({ contactName: 'Omar Khan', contactDateOfBirth: '1980-05-05' }), say('May I have a number?'));
+      await send(conversationId, 'This is Omar Khan, born 5 May 1980, please call me back.');
+      expect(await saved(conversationId)).toEqual([]);
+      expect(toldAfterTool()).toContain('There is no number to call this caller back on');
+    });
+
+    it('never uses another practice’s patient', async () => {
+      const { conversationId } = await start();
+      script(task({ contactName: 'Beth Beta', contactDateOfBirth: '1992-04-04' }), say('May I have a number?'));
+      await send(conversationId, 'I am Beth Beta, born 4 April 1992, call me back please.');
+      expect(await saved(conversationId)).toEqual([]);
+    });
+
+    it('refuses a date of birth the caller never said', async () => {
+      const { conversationId } = await start();
+      script(task(), say('Could you tell me your date of birth?'));
+      await send(conversationId, 'I am Sara Ali, please call me back about an appointment.');
+      expect(await saved(conversationId)).toEqual([]);
+      expect(toldAfterTool()).toContain('is not what the caller said');
+    });
+
+    it.each([
+      ['a date that does not exist', { contactDateOfBirth: '1991-13-45' }, 'not a real date'],
+      ['a date in the future', { contactDateOfBirth: '2999-01-01' }, 'not a real date'],
+      ['a date not written YYYY-MM-DD', { contactDateOfBirth: '3 February 1991' }, 'not a real date'],
+      ['no date of birth', { contactDateOfBirth: '' }, 'first and last name and date of birth'],
+      ['"null" as the date of birth', { contactDateOfBirth: 'null' }, 'first and last name and date of birth'],
+      ['no name', { contactName: '' }, 'first and last name and date of birth'],
+      ['"none" as the name', { contactName: 'none' }, 'first and last name and date of birth'],
+    ])('refuses %s, and tells the model what is needed', async (_name, change, expected) => {
+      const { conversationId } = await start();
+      script(task(change), say('Let me check your details.'));
+      await send(conversationId, SARA);
+      expect(await saved(conversationId)).toEqual([]);
+      expect(toldAfterTool()).toContain(expected);
+    });
+
+    it('a model that asks only for a phone number, the old way, is refused: the caller must give a name and date of birth', async () => {
+      const { conversationId } = await start();
+      script(callTool('create_staff_task', { type: 'callback', title: 'Wants an appointment', contactPhone: '+14155550111' }), say('May I have your date of birth?'));
+      await send(conversationId, 'call me on +14155550111');
+      expect(await saved(conversationId)).toEqual([]);
+      expect(toldAfterTool()).toContain('first and last name and date of birth');
+    });
+
+    it('saves the same message once when the model is told to save it again, but a different message is a new task', async () => {
+      const { conversationId } = await start();
+      script(task(), say('Passed on.'));
+      await send(conversationId, SARA);
+      script(task({ details: 'again' }), say('It has already been passed on.'));
+      const again = await send(conversationId, 'yes please save it');
+      expect(again.createdTaskIds).toEqual([]);
+      expect(await saved(conversationId)).toHaveLength(1);
+      expect(JSON.stringify(model.requests.at(-1)!.messages.at(-1))).toContain('already passed on'); // what the model was told after its second request
+
+      script(task({ title: 'Question about parking' }), say('Passed on as well.'));
+      await send(conversationId, 'also, please ask about parking');
+      expect(await saved(conversationId)).toHaveLength(2);
+    });
+
+    it('after an emergency, the callback request also asks for name and date of birth', async () => {
+      const { conversationId } = await start();
+      await send(conversationId, 'I have chest pain and I need an appointment');
+      script(say('May I have your name and date of birth?'));
+      await send(conversationId, 'ok');
+      const first = model.requests[0]!;
+      expect(first.system).toContain('already been given emergency or urgent instructions');
+      expect(first.system).toContain('date of birth (the system finds the number to call back)');
+      expect(first.system).not.toContain('a phone number to call back');
+    });
+
+    it('switching the practice back to name and phone number brings back the earlier questions', async () => {
+      await as(app, token.admin).patch('/api/ai/settings', { messageContact: 'name_phone' }).expect(200);
+      try {
+        const { conversationId } = await start();
+        script(say('Hello.'));
+        await send(conversationId, 'hello');
+        const request = model.requests[0]!;
+        const messageTool = request.tools.find((candidate) => candidate.name === 'create_staff_task')!;
+        expect(messageTool.parameters).toMatchObject({ required: ['type', 'title', 'contactPhone'] });
+        expect(messageTool.description).not.toContain('only when the caller asks to leave a message'); // the earlier wording
+        expect(request.system).toContain('a phone number to call back');
+        expect(request.system).not.toContain('Do not ask for a phone number');
+      } finally {
+        await as(app, token.admin).patch('/api/ai/settings', { messageContact: 'name_dob' }).expect(200);
+      }
     });
   });
 

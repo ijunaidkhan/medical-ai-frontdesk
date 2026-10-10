@@ -63,7 +63,7 @@ export class SchedulingService {
 
       const changes = {} as Record<string, number | boolean | string>;
       const fields: string[] = [];
-      const note = <K extends 'slotMinutes' | 'minNoticeHours' | 'maxAdvanceDays' | 'cancelMinHours' | 'aiBookingEnabled' | 'timeFormat' | 'identityFailureCapPerHour'>(key: K, column: string) => {
+      const note = <K extends 'slotMinutes' | 'minNoticeHours' | 'maxAdvanceDays' | 'cancelMinHours' | 'aiBookingEnabled' | 'timeFormat' | 'identityFailureCapPerHour' | 'identityCheck'>(key: K, column: string) => {
         const value = dto[key];
         if (value !== undefined && value !== current[key]) {
           changes[column] = value;
@@ -77,6 +77,7 @@ export class SchedulingService {
       note('aiBookingEnabled', 'ai_booking_enabled');
       note('timeFormat', 'time_format');
       note('identityFailureCapPerHour', 'identity_failure_cap_per_hour');
+      note('identityCheck', 'identity_check');
       if (fields.length === 0) {
         throw new BadRequestException('Nothing to change');
       }
@@ -117,6 +118,7 @@ export class SchedulingService {
       aiBookingEnabled: row.ai_booking_enabled,
       timeFormat: row.time_format,
       identityFailureCapPerHour: row.identity_failure_cap_per_hour,
+      identityCheck: row.identity_check,
       updatedAt: row.updated_at.toISOString(),
     };
   }

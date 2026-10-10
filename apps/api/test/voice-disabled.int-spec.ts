@@ -39,6 +39,11 @@ describe('phone routes while voice is switched off', () => {
     await request(app.getHttpServer()).post('/api/voice/incoming').set('Authorization', `Bearer ${token}`).type('form').send({}).expect(404);
   });
 
+  it('the web phone does not exist either, even for the owner', async () => {
+    const token = (await signIn(app, { email: alpha.ownerEmail })).session.accessToken;
+    await as(app, token).post('/api/voice/web-calls').expect(404);
+  });
+
   it('nothing listens for live voice sessions: a WebSocket attempt never connects, whatever it carries', async () => {
     await app.listen(0, '127.0.0.1');
     const { port } = (app.getHttpServer() as unknown as Server).address() as AddressInfo;

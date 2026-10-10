@@ -17,6 +17,7 @@ const task = (id: string, title: string, extra: Partial<Task> = {}): Task => ({
   details: null,
   contactName: null,
   contactPhone: null,
+  contactDateOfBirth: null,
   createdBy: { kind: 'user', person: { userId: OMAR, name: 'Omar Raza' } },
   assignedTo: null,
   conversationId: null,
@@ -90,6 +91,16 @@ describe('TasksPage', () => {
       expect(second!.textContent).toContain('Added by Omar Raza');
       expect(second!.textContent).toContain('Not assigned');
       expect(second!.textContent).toContain('5 Oct 2026, 09:00'); // in New York
+    });
+
+    it('shows the date of birth the AI receptionist took, so staff can find the patient, even when there is no name', async () => {
+      await setup({ tasks: [task('t3', 'Wants an appointment', { createdBy: { kind: 'ai' }, contactName: 'Sara Ali', contactPhone: '+14155550111', contactDateOfBirth: '1991-02-03' }), task('t4', 'No details'), task('t5', 'Only a birth date', { contactDateOfBirth: '1985-09-12' })] });
+      const [withAll, none, onlyBirth] = cards();
+      expect(withAll!.querySelector('.contact')?.textContent).toContain('Sara Ali');
+      expect(withAll!.querySelector('.contact .muted')?.textContent).toBe('born 1991-02-03');
+      expect(withAll!.querySelector('.contact a[href="tel:+14155550111"]')?.textContent).toBe('+14155550111');
+      expect(none!.querySelector('.contact')).toBeNull();
+      expect(onlyBirth!.querySelector('.contact')?.textContent).toContain('born 1985-09-12');
     });
 
     it('filters by status and by who it is assigned to', async () => {

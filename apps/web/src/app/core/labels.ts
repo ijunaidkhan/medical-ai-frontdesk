@@ -3,6 +3,9 @@ import type {
   AuditLogEntry,
   ConversationChannel,
   ConversationOutcome,
+  ConversationSummary,
+  IdentityCheck,
+  MessageContact,
   TaskStatus,
   TaskType,
   TurnSource,
@@ -50,6 +53,16 @@ export const URGENT_ACTION_LABELS: Readonly<Record<UrgentAction, string>> = {
   urgent_task: 'Create an urgent task for staff',
   transfer: 'Transfer the call to a person',
   transfer_and_task: 'Transfer the call and create an urgent task',
+};
+
+export const MESSAGE_CONTACT_LABELS: Readonly<Record<MessageContact, string>> = {
+  name_dob: 'Name and date of birth (the system finds the number to call back)',
+  name_phone: 'Name and phone number',
+};
+
+export const IDENTITY_CHECK_LABELS: Readonly<Record<IdentityCheck, string>> = {
+  name_dob: 'Name and date of birth',
+  name_dob_phone: 'Name, date of birth and phone number (stricter)',
 };
 
 export const TRANSFER_PURPOSE_LABELS: Readonly<Record<TransferPurpose, string>> = {
@@ -170,10 +183,14 @@ export const TASK_ACTION_LABELS: Readonly<Record<TaskStatus, string>> = {
   cancelled: 'Cancel task',
 };
 
-export const CHANNEL_LABELS: Readonly<Record<ConversationChannel, string>> = {
+const CHANNEL_LABELS: Readonly<Record<ConversationChannel, string>> = {
   test_chat: 'Test chat',
   phone: 'Phone call',
 };
+
+/** A phone conversation started by a staff member (not by a dialed number) is a call made from the web phone. */
+export const channelLabel = (conversation: Pick<ConversationSummary, 'channel' | 'startedByName'>): string =>
+  conversation.channel === 'phone' && conversation.startedByName !== null ? 'Phone call (web phone test)' : CHANNEL_LABELS[conversation.channel];
 
 export const OUTCOME_LABELS: Readonly<Record<ConversationOutcome, string>> = {
   answered: 'Answered',

@@ -15,7 +15,8 @@ import {
   type UpdateTaskRequest,
 } from '@frontdesk/shared';
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import { IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, Validate, ValidateIf } from 'class-validator';
+import { BirthDateConstraint } from '../common/birth-date.constraint.js';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 /** Validate unless absent. (Absent leaves a field alone; null is checked separately below.) */
@@ -56,6 +57,10 @@ export class CreateTaskDto implements CreateTaskRequest {
   @IsOptional()
   @Matches(PHONE_PATTERN, { message: PHONE_MESSAGE })
   contactPhone?: string;
+
+  @IsOptional()
+  @Validate(BirthDateConstraint)
+  contactDateOfBirth?: string;
 
   @IsOptional()
   @IsIn(TASK_PRIORITIES)

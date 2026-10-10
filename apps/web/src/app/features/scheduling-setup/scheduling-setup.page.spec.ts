@@ -13,6 +13,7 @@ const settings = (extra: Partial<SchedulingSettings> = {}): SchedulingSettings =
   aiBookingEnabled: false,
   timeFormat: '12h',
   identityFailureCapPerHour: 30,
+  identityCheck: 'name_dob',
   updatedAt: null,
   ...extra,
 });
@@ -184,6 +185,26 @@ describe('SchedulingSetupPage', () => {
       expect(request.request.body).toEqual({ slotMinutes: 30, identityFailureCapPerHour: 50 });
       request.flush(settings({ slotMinutes: 30, identityFailureCapPerHour: 50 }));
       await render(fixture);
+    });
+
+    it('shows what identifies a caller, warns that name and date of birth is the weaker choice, and sends the change when the stricter one is chosen', async () => {
+      await setup();
+      const select = field<HTMLSelectElement>('identity-check');
+      expect(select.selectedOptions[0]?.textContent).toBe('Name and date of birth');
+      expect([...select.options].map((option) => option.value)).toEqual(['name_dob', 'name_dob_phone']);
+      expect(root().textContent).toContain('weaker');
+      await choose('identity-check', 'name_dob_phone');
+      await click(button('Save rules'));
+      const request = http.expectOne((r) => r.method === 'PATCH');
+      expect(request.request.body).toEqual({ identityCheck: 'name_dob_phone' });
+      request.flush(settings({ identityCheck: 'name_dob_phone' }));
+      await render(fixture);
+      expect(field<HTMLSelectElement>('identity-check').selectedOptions[0]?.textContent).toContain('Name, date of birth and phone number');
+    });
+
+    it('does not let someone who may only look change it', async () => {
+      await setup({ role: 'staff' });
+      expect(field<HTMLSelectElement>('identity-check').disabled).toBe(true);
     });
 
     it.each([

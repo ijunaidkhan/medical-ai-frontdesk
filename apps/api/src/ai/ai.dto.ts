@@ -3,6 +3,7 @@ import {
   CRISIS_MESSAGE_MAX_LENGTH,
   EMERGENCY_MESSAGE_MAX_LENGTH,
   GREETING_MAX_LENGTH,
+  MESSAGE_CONTACTS,
   PHONE_PATTERN,
   TRANSFER_LABEL_MAX_LENGTH,
   TRANSFER_PURPOSES,
@@ -14,6 +15,7 @@ import {
   type AfterHoursAction,
   type BusinessHours,
   type CreateTransferTargetRequest,
+  type MessageContact,
   type TransferPurpose,
   type UpdateAiSettingsRequest,
   type UpdateTransferTargetRequest,
@@ -100,6 +102,10 @@ export class UpdateAiSettingsDto implements UpdateAiSettingsRequest {
   @MinLength(URGENT_PHRASE_MIN_LENGTH, { each: true })
   @MaxLength(URGENT_PHRASE_MAX_LENGTH, { each: true })
   extraUrgentPhrases?: string[];
+
+  @ValidateIf(provided)
+  @IsIn(MESSAGE_CONTACTS)
+  messageContact?: MessageContact;
 
   @ValidateIf(provided)
   @Validate(BusinessHoursConstraint)

@@ -102,9 +102,12 @@
         @if (task.details) {
           <p class="details">{{ task.details }}</p>
         }
-        @if (task.contactName || task.contactPhone) {
+        @if (task.contactName || task.contactPhone || task.contactDateOfBirth) {
           <p class="contact">
             {{ task.contactName }}
+            @if (task.contactDateOfBirth) {
+              <span class="muted">born {{ task.contactDateOfBirth }}</span>
+            }
             @if (task.contactPhone) {
               <a [href]="'tel:' + task.contactPhone">{{ task.contactPhone }}</a>
             }

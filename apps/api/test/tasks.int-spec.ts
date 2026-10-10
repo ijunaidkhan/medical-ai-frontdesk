@@ -98,11 +98,23 @@ describe('staff tasks', () => {
         details: null,
         contactName: null,
         contactPhone: null,
+        contactDateOfBirth: null,
         assignedTo: null,
         dueAt: null,
         completedAt: null,
         createdBy: { kind: 'user', person: { userId: userId.staff, name: 'Member staff@alpha.test' } },
       });
+    });
+
+    it('stores a date of birth as the same calendar day it was given, however the server clock is set, and shows it in the list', async () => {
+      const task = await create({ type: 'callback', title: 'Needs a call', contactName: 'Sara Ali', contactDateOfBirth: '1991-02-03' });
+      expect(task.contactDateOfBirth).toBe('1991-02-03');
+      expect((await list('?status=all&limit=100')).items.find((item) => item.id === task.id)?.contactDateOfBirth).toBe('1991-02-03');
+    });
+
+    it('never puts a date of birth in the audit record', async () => {
+      const task = await create({ type: 'callback', title: 'Needs a call', contactDateOfBirth: '1984-07-21' });
+      expect(JSON.stringify(await audit('task.created', task.id))).not.toContain('1984');
     });
 
     it('stores every field, and assigns to an active member', async () => {
@@ -154,6 +166,10 @@ describe('staff tasks', () => {
       ['a phone without a country code', { type: 'callback', title: 't', contactPhone: '415-555-0123' }],
       ['a phone that is too short', { type: 'callback', title: 't', contactPhone: '+123' }],
       ['a phone with letters', { type: 'callback', title: 't', contactPhone: '+1415abc0123' }],
+      ['a date of birth that does not exist', { type: 'callback', title: 't', contactDateOfBirth: '1991-02-30' }],
+      ['a date of birth in the future', { type: 'callback', title: 't', contactDateOfBirth: '2999-01-01' }],
+      ['a date of birth before 1900', { type: 'callback', title: 't', contactDateOfBirth: '1899-12-31' }],
+      ['a date of birth in words', { type: 'callback', title: 't', contactDateOfBirth: '3 February 1991' }],
       ['an unknown priority', { type: 'callback', title: 't', priority: 'critical' }],
       ['a due date that is not a date', { type: 'callback', title: 't', dueAt: 'tomorrow' }],
       ['an impossible due date', { type: 'callback', title: 't', dueAt: '2026-13-45T00:00:00Z' }],

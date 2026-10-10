@@ -50,8 +50,8 @@ describe('ShellComponent', () => {
 
   describe('navigation follows the role', () => {
     it.each<[Role, string[]]>([
-      ['owner', ['Dashboard', 'Tasks', 'Conversations', 'Team', 'Knowledge', 'AI receptionist', 'Test chat', 'Schedule', 'Scheduling setup', 'Activity']],
-      ['admin', ['Dashboard', 'Tasks', 'Conversations', 'Team', 'Knowledge', 'AI receptionist', 'Test chat', 'Schedule', 'Scheduling setup', 'Activity']],
+      ['owner', ['Dashboard', 'Tasks', 'Conversations', 'Team', 'Knowledge', 'AI receptionist', 'Test chat', 'Web phone', 'Schedule', 'Scheduling setup', 'Activity']],
+      ['admin', ['Dashboard', 'Tasks', 'Conversations', 'Team', 'Knowledge', 'AI receptionist', 'Test chat', 'Web phone', 'Schedule', 'Scheduling setup', 'Activity']],
       ['staff', ['Dashboard', 'Tasks', 'Conversations', 'Team', 'Knowledge', 'AI receptionist', 'Schedule', 'Scheduling setup']],
       ['viewer', ['Dashboard']],
     ])('%s sees %j', async (role, expected) => {

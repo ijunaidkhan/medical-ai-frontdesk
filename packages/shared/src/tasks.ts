@@ -47,6 +47,8 @@ export interface Task {
   contactName: string | null;
   /** International format, e.g. +14155550123. */
   contactPhone: string | null;
+  /** YYYY-MM-DD. Taken by the AI receptionist so staff can find the patient. */
+  contactDateOfBirth: string | null;
   /** Who made it: a staff member, or the AI receptionist. */
   createdBy: { kind: 'user'; person: TaskPerson | null } | { kind: 'ai' };
   assignedTo: TaskPerson | null;
@@ -64,6 +66,7 @@ export interface CreateTaskRequest {
   details?: string;
   contactName?: string;
   contactPhone?: string;
+  contactDateOfBirth?: string;
   priority?: TaskPriority;
   dueAt?: string;
   /** An active member of the practice. */

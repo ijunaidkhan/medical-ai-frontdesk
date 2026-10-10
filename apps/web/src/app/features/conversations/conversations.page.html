@@ -12,7 +12,7 @@
         <a class="card row" [class.emergency]="item.escalation === 'emergency'" [routerLink]="['/conversations', item.id]">
           <span class="when">{{ when(item.startedAt) }}</span>
           <span class="what">
-            <strong>{{ channelLabels[item.channel] }}</strong>
+            <strong>{{ channelLabel(item) }}</strong>
             @if (item.startedByName) {
               <span class="muted"> by {{ item.startedByName }}</span>
             }

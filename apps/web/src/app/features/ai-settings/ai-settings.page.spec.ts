@@ -15,6 +15,7 @@ const settings = (extra: Partial<AiSettings> = {}): AiSettings => ({
   urgentAction: 'urgent_task',
   urgentTransferTargetId: null,
   extraUrgentPhrases: [],
+  messageContact: 'name_dob',
   businessHours: { ...emptyBusinessHours(), mon: [{ open: '09:00', close: '17:00' }] },
   updatedAt: '2026-09-30T10:00:00.000Z',
   ready: true,
@@ -126,6 +127,33 @@ describe('AiSettingsPage', () => {
       const request = patch();
       expect(request.request.body).toEqual({ crisisMessage: 'Call or text 988 now.' });
       request.flush(settings({ crisisMessage: 'Call or text 988 now.' }));
+    });
+
+    it('shows what the AI asks for when taking a message, and sends the change when another is chosen', async () => {
+      await setup();
+      const choice = field<HTMLSelectElement>('message-contact');
+      expect(choice.selectedOptions[0]?.textContent).toContain('Name and date of birth');
+      expect([...choice.options].map((option) => option.value)).toEqual(['name_dob', 'name_phone']);
+      choice.value = 'name_phone';
+      choice.dispatchEvent(new Event('change'));
+      await render(fixture);
+      button('Save changes')!.click();
+      await render(fixture);
+      const request = patch();
+      expect(request.request.body).toEqual({ messageContact: 'name_phone' });
+      request.flush(settings({ messageContact: 'name_phone' }));
+      await render(fixture);
+      expect(field<HTMLSelectElement>('message-contact').selectedOptions[0]?.textContent).toBe('Name and phone number');
+    });
+
+    it('says why the phone number is not asked for with the default choice', async () => {
+      await setup();
+      expect(root().textContent).toContain('callers are not asked for a phone number');
+    });
+
+    it('does not let someone who may only look change it', async () => {
+      await setup({ role: 'staff' });
+      expect(field<HTMLSelectElement>('message-contact').disabled).toBe(true);
     });
 
     it('turns one phrase per line into a list, ignoring blank lines and spaces', async () => {

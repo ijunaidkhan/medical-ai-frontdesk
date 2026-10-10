@@ -18,6 +18,7 @@ const settings = (extra: Partial<SchedulingSettings> = {}): SchedulingSettings =
   aiBookingEnabled: true,
   timeFormat: '12h',
   identityFailureCapPerHour: 30,
+  identityCheck: 'name_dob',
   updatedAt: null,
   ...extra,
 });

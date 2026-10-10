@@ -39,6 +39,9 @@ const toPatient = (row: PatientRow): Patient => ({
   createdAt: row.created_at.toISOString(),
 });
 
+/** A name for comparing: one space between the words, no capital letters. */
+const normalizeName = (name: string): string => name.trim().replace(/\s+/g, ' ').toLowerCase();
+
 /** Makes a piece of text safe to use inside LIKE (the user's % and _ mean themselves). */
 const escapeLike = (text: string): string => text.replace(/[\\%_]/g, (character) => `\\${character}`);
 
@@ -149,6 +152,21 @@ export class PatientsService {
       metadata: { source: actor.kind },
     });
     return { patient: toPatient(inserted), created: true };
+  }
+
+  /**
+   * The patient with this full name (capital letters and extra spaces ignored) and date of birth. Null when there is
+   * none, and also when more than one patient matches (two numbers on file for one name and birthday): never a guess.
+   */
+  async findByNameAndBirth(db: Kysely<Database>, fullName: string, dateOfBirth: string): Promise<Patient | null> {
+    const rows = await db
+      .selectFrom('patients')
+      .select(patientColumns)
+      .where(sql<boolean>`regexp_replace(lower(first_name || ' ' || last_name), '\\s+', ' ', 'g') = ${normalizeName(fullName)}`)
+      .where(sql<boolean>`date_of_birth = ${dateOfBirth}::date`)
+      .limit(2)
+      .execute();
+    return rows.length === 1 ? toPatient(rows[0]!) : null;
   }
 
   /** The patient who matches on all four details (names without regard to capital letters), if any. */

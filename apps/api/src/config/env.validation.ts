@@ -3,7 +3,7 @@ import { IsIn, IsInt, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min,
 
 export const NODE_ENVS = ['development', 'test', 'production'] as const;
 export const LLM_PROVIDERS = ['none', 'anthropic', 'ollama'] as const;
-export const VOICE_PROVIDERS = ['none', 'twilio'] as const;
+export const VOICE_PROVIDERS = ['none', 'twilio', 'dev'] as const;
 export const VOICE_TTS_PROVIDERS = ['Google', 'Amazon', 'ElevenLabs'] as const;
 export const VOICE_STT_PROVIDERS = ['Google', 'Deepgram'] as const;
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
@@ -109,7 +109,9 @@ export class EnvironmentVariables {
 
   /**
    * Whether the API answers phone calls. "none" (the default) keeps every /api/voice
-   * route switched off (404); "twilio" needs the two settings below.
+   * route switched off (404); "twilio" needs the two settings below. "dev" switches on the
+   * web phone (a signed-in staff member talks to the receptionist from the browser, with no
+   * phone provider); it is refused in production.
    */
   @Transform(({ value }) => (value === undefined || value === '' ? 'none' : value))
   @IsIn(VOICE_PROVIDERS)
@@ -174,10 +176,11 @@ export function validateEnv(raw: Record<string, unknown>): EnvironmentVariables 
   const config = plainToInstance(EnvironmentVariables, raw, { exposeDefaultValues: true });
   const errors = validateSync(config, { skipMissingProperties: false, whitelist: true });
 
-  if (errors.length > 0) {
-    const problems = errors.map(
-      (error) => `${error.property}: ${Object.values(error.constraints ?? {}).join('; ')}`,
-    );
+  const problems = errors.map((error) => `${error.property}: ${Object.values(error.constraints ?? {}).join('; ')}`);
+  if (config.VOICE_PROVIDER === 'dev' && config.NODE_ENV === 'production') {
+    problems.push('VOICE_PROVIDER: "dev" (the web phone) is for development only and cannot be used in production');
+  }
+  if (problems.length > 0) {
     throw new Error(`Invalid environment configuration:\n  ${problems.join('\n  ')}`);
   }
 

@@ -7,7 +7,7 @@ import { errorMessage } from '../../core/api/api-error';
 import { ConversationsApi } from '../../core/api/conversations-api';
 import { AuthService } from '../../core/auth/auth.service';
 import { formatDateTime } from '../../core/format';
-import { CHANNEL_LABELS, guardReasonLabel, OUTCOME_LABELS, toolLabel, turnSourceNote } from '../../core/labels';
+import { channelLabel, guardReasonLabel, OUTCOME_LABELS, toolLabel, turnSourceNote } from '../../core/labels';
 
 const STATUS_LABELS = { ok: 'done', rejected: 'refused by the system', error: 'failed' } as const;
 
@@ -35,7 +35,7 @@ export class ConversationPage {
   private readonly api = inject(ConversationsApi);
   private readonly route = inject(ActivatedRoute);
 
-  protected readonly channelLabels = CHANNEL_LABELS;
+  protected readonly channelLabel = channelLabel;
   protected readonly outcomeLabels = OUTCOME_LABELS;
   protected readonly toolLabel = toolLabel;
   protected readonly guardReasonLabel = guardReasonLabel;

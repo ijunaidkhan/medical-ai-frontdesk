@@ -6,6 +6,7 @@ import {
   APPOINTMENT_TYPE_NAME_MAX_LENGTH,
   CANCEL_MIN_HOURS_MAX,
   emptyBusinessHours,
+  IDENTITY_CHECKS,
   IDENTITY_FAILURE_CAP_MAX,
   IDENTITY_FAILURE_CAP_MIN,
   MAX_ADVANCE_DAYS_MAX,
@@ -18,6 +19,7 @@ import {
   validateBusinessHours,
   type AppointmentType,
   type BusinessHours,
+  type IdentityCheck,
   type Provider,
   type ProviderTimeOff,
   type SchedulingSettings,
@@ -31,6 +33,7 @@ import { firstValueFrom } from 'rxjs';
 import { errorMessage, errorMessages } from '../../core/api/api-error';
 import { SchedulingApi } from '../../core/api/scheduling-api';
 import { AuthService } from '../../core/auth/auth.service';
+import { IDENTITY_CHECK_LABELS } from '../../core/labels';
 import { formatWhen, todayIn, zonedInstant } from '../../core/zoned-time';
 import { HoursEditorComponent } from '../../shared/hours-editor/hours-editor.component';
 
@@ -42,6 +45,7 @@ interface RulesDraft {
   cancelMinHours: string;
   timeFormat: TimeFormat;
   identityFailureCapPerHour: string;
+  identityCheck: IdentityCheck;
 }
 
 interface ProviderDraft {
@@ -82,6 +86,7 @@ const toRulesDraft = (settings: SchedulingSettings): RulesDraft => ({
   cancelMinHours: String(settings.cancelMinHours),
   timeFormat: settings.timeFormat,
   identityFailureCapPerHour: String(settings.identityFailureCapPerHour),
+  identityCheck: settings.identityCheck,
 });
 
 /** A whole number written in plain digits, or null. */
@@ -107,6 +112,8 @@ export class SchedulingSetupPage {
 
   protected readonly slotOptions = SLOT_MINUTES_OPTIONS;
   protected readonly timeFormats = TIME_FORMATS;
+  protected readonly identityChecks = IDENTITY_CHECKS;
+  protected readonly identityCheckLabels = IDENTITY_CHECK_LABELS;
   protected readonly limits = {
     providerName: PROVIDER_NAME_MAX_LENGTH,
     providerTitle: PROVIDER_TITLE_MAX_LENGTH,
@@ -160,6 +167,7 @@ export class SchedulingSetupPage {
       if (value !== settings[key]) changes[key] = value;
     }
     if (draft.timeFormat !== settings.timeFormat) changes.timeFormat = draft.timeFormat;
+    if (draft.identityCheck !== settings.identityCheck) changes.identityCheck = draft.identityCheck;
     return changes;
   });
   protected readonly rulesDirty = computed(() => {
@@ -298,6 +306,11 @@ export class SchedulingSetupPage {
   protected chooseTimeFormat(event: Event): void {
     const chosen = TIME_FORMATS.find((format) => format === this.value(event));
     if (chosen) this.setRule('timeFormat', chosen);
+  }
+
+  protected chooseIdentityCheck(event: Event): void {
+    const chosen = IDENTITY_CHECKS.find((check) => check === this.value(event));
+    if (chosen) this.setRule('identityCheck', chosen);
   }
 
   protected async saveRules(): Promise<void> {

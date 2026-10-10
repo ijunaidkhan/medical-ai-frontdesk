@@ -103,10 +103,10 @@ describe('the live voice session', () => {
 
   // -------------------------------------------------------------- helpers
 
-  /** Twilio's first request about a call: creates the conversation and returns the address of the voice session. */
-  async function startCall(): Promise<{ sid: string; relay: string; conversationId: string }> {
+  /** Twilio's first request about a call: creates the conversation and returns the address of the voice session. `null` is a caller who withholds their number. */
+  async function startCall(caller: string | null = CALLER): Promise<{ sid: string; relay: string; conversationId: string }> {
     const sid = newSid();
-    const params = { CallSid: sid, From: CALLER, To: ALPHA_NUMBER };
+    const params: Record<string, string> = { CallSid: sid, To: ALPHA_NUMBER, ...(caller === null ? {} : { From: caller }) };
     const res = await request(app.getHttpServer())
       .post('/api/voice/incoming')
       .set('X-Forwarded-For', uniqueIp())
@@ -216,6 +216,10 @@ describe('the live voice session', () => {
 
   // -------------------------------------------------------------- a call
 
+  it('the web phone does not exist when Twilio is the provider, even for the owner', async () => {
+    await as(app, token).post('/api/voice/web-calls').expect(404);
+  });
+
   describe('a call, as Twilio plays it', () => {
     it('answers what the caller says, stores both sides, and closes out the call when the caller hangs up', async () => {
       const { sid, relay, conversationId } = await startCall();
@@ -278,22 +282,41 @@ describe('the live voice session', () => {
       expect((await conversation(conversationId)).outcome).toBe('emergency'); // earned, so not "abandoned"
     });
 
-    it('takes a callback request by voice: the task is real, and the call closes out as a message taken', async () => {
+    const messageTask = (extra: Record<string, unknown> = {}) =>
+      callTool('create_staff_task', { type: 'callback', title: 'Wants an appointment', contactName: 'Jane Smith', contactDateOfBirth: '1991-02-03', ...extra });
+    const tasksOf = (conversationId: string) => owner.selectFrom('staff_tasks').selectAll().where('conversation_id', '=', conversationId).execute();
+
+    it('takes a message by voice with just a name and birth date: the task is real, it is to be called on the number the caller is calling from, and the call closes out as a message taken', async () => {
       const { sid, relay, conversationId } = await startCall();
-      script(
-        callTool('create_staff_task', { type: 'callback', title: 'Wants an appointment', contactName: 'Jane', contactPhone: '+14155550123' }),
-        say('Thank you Jane, I have passed your details to our team.'),
-      );
+      script(messageTask(), say('Thank you Jane, I have passed your details to our team.'));
       const client = await openSession(relay);
       setup(client, sid);
-      prompt(client, 'Please ask someone to call me about an appointment, my name is Jane and my number is four one five five five five zero one two three');
+      prompt(client, 'Please ask someone to call me about an appointment, my name is Jane Smith and I was born on 3 February 1991');
       await until(() => messageOfType(client, 'text') !== undefined);
-      expect(await owner.selectFrom('staff_tasks').selectAll().where('conversation_id', '=', conversationId).execute()).toMatchObject([
-        { type: 'callback', created_by_type: 'ai', contact_phone: '+14155550123' },
-      ]);
+      expect(await tasksOf(conversationId)).toMatchObject([{ type: 'callback', created_by_type: 'ai', contact_name: 'Jane Smith', contact_phone: CALLER }]);
+      const told = JSON.stringify(model.requests[1]!.messages.at(-1));
+      expect(told).toContain('number they are calling from');
+      expect(told).not.toContain('6505550199'); // the model is never told the number
       client.ws.close();
       await until(async () => (await conversation(conversationId)).status === 'completed');
       expect((await conversation(conversationId)).outcome).toBe('message_taken');
+    });
+
+    it('a caller who withholds their number is asked for one, and the number they say (in words, as on a phone) is saved with the message', async () => {
+      const { sid, relay, conversationId } = await startCall(null);
+      expect((await conversation(conversationId)).caller_number).toBeNull();
+      script(messageTask(), say('May I have a number to call you back on?'));
+      const client = await openSession(relay);
+      setup(client, sid);
+      prompt(client, 'Please ask someone to call me, my name is Jane Smith and I was born on 3 February 1991');
+      await until(() => client.received.filter((message) => message['type'] === 'text').length === 1);
+      expect(await tasksOf(conversationId)).toEqual([]);
+      expect(JSON.stringify(model.requests[1]!.messages.at(-1))).toContain('There is no number to call this caller back on');
+
+      script(messageTask({ contactPhone: '+14155550123' }), say('Thank you, passed on.'));
+      prompt(client, 'my number is four one five five five five zero one two three');
+      await until(() => client.received.filter((message) => message['type'] === 'text').length === 2);
+      expect(await tasksOf(conversationId)).toMatchObject([{ contact_phone: '+14155550123', contact_name: 'Jane Smith' }]);
     });
 
     it('when the receptionist finishes the conversation, Twilio is told the session is over', async () => {

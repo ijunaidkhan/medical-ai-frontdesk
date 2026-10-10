@@ -18,7 +18,7 @@ import type { CreateTransferTargetDto, UpdateAiSettingsDto, UpdateTransferTarget
 const UNIQUE_VIOLATION = '23505';
 
 /** The settings a practice starts with: everything off, nothing written. */
-type State = AiConfiguration & Pick<AiSettings, 'enabled' | 'extraUrgentPhrases'>;
+type State = AiConfiguration & Pick<AiSettings, 'enabled' | 'extraUrgentPhrases' | 'messageContact'>;
 
 const DEFAULT_STATE: State = {
   enabled: false,
@@ -30,6 +30,7 @@ const DEFAULT_STATE: State = {
   urgentAction: 'urgent_task',
   urgentTransferTargetId: null,
   extraUrgentPhrases: [],
+  messageContact: 'name_dob',
   businessHours: emptyBusinessHours(),
 };
 
@@ -75,6 +76,7 @@ export class AiService {
       if (dto.urgentAction !== undefined) next.urgentAction = dto.urgentAction;
       if (dto.urgentTransferTargetId !== undefined) next.urgentTransferTargetId = dto.urgentTransferTargetId;
       if (dto.extraUrgentPhrases !== undefined) next.extraUrgentPhrases = uniquePhrases(dto.extraUrgentPhrases);
+      if (dto.messageContact !== undefined) next.messageContact = dto.messageContact;
       if (dto.businessHours !== undefined) next.businessHours = normalizeBusinessHours(dto.businessHours);
 
       // Only numbers that exist here and are active may be chosen.
@@ -107,6 +109,7 @@ export class AiService {
         urgent_action: next.urgentAction,
         urgent_transfer_target_id: next.urgentTransferTargetId,
         extra_urgent_phrases: next.extraUrgentPhrases,
+        message_contact: next.messageContact,
         business_hours: next.businessHours,
         updated_by: auth.userId,
       };
@@ -234,6 +237,7 @@ export class AiService {
         urgentAction: row.urgent_action,
         urgentTransferTargetId: row.urgent_transfer_target_id,
         extraUrgentPhrases: row.extra_urgent_phrases,
+        messageContact: row.message_contact,
         businessHours: normalizeBusinessHours(row.business_hours),
       },
     };

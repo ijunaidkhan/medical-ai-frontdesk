@@ -80,6 +80,18 @@
           </select>
         </div>
         <div class="field">
+          <label for="identity-check">Who the AI treats as the patient</label>
+          <select id="identity-check" class="input" [disabled]="!canEdit()" (change)="chooseIdentityCheck($event)" aria-describedby="identity-check-help">
+            @for (check of identityChecks; track check) {
+              <option [value]="check" [selected]="check === r.identityCheck">{{ identityCheckLabels[check] }}</option>
+            }
+          </select>
+          <p id="identity-check-help" class="muted hint">
+            What a caller must say before the AI tells them about, cancels or moves their appointments. Name and date of birth is easier to say on a call, but weaker:
+            anyone who knows a patient’s name and birthday could see or cancel that patient’s appointments. Adding the phone number is stricter.
+          </p>
+        </div>
+        <div class="field">
           <label for="identity-cap">Failed identity checks per hour</label>
           <input id="identity-cap" class="input number" inputmode="numeric" [disabled]="!canEdit()" [value]="r.identityFailureCapPerHour" (input)="setRule('identityFailureCapPerHour', value($event))" aria-describedby="identity-cap-help" />
           <p id="identity-cap-help" class="muted hint">

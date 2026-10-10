@@ -37,6 +37,8 @@ describe('the AI receptionist books appointments', () => {
   let alpha: Practice;
   let delta: Practice; // the practice-wide identity cap
   let gamma: Practice; // another practice with the same people
+  let epsilon: Practice; // identifies callers by name and date of birth alone (the default)
+  let zeta: Practice; // the same, for the practice-wide cap on failed identity checks
 
   const queue: Step[] = [];
   const model = new ScriptedModel((request) => {
@@ -128,7 +130,8 @@ describe('the AI receptionist books appointments', () => {
     return { id: conversationId, reply };
   };
 
-  async function prepare(slug: string): Promise<Practice> {
+  /** `identityCheck` is what identifies a caller: the earlier tests are about the stricter check (name, birth date and phone). */
+  async function prepare(slug: string, identityCheck: 'name_dob' | 'name_dob_phone' = 'name_dob_phone'): Promise<Practice> {
     const seeded = await seedPractice(owner, slug);
     await addMember(owner, seeded.practiceId, `admin@${slug}.test`, 'admin');
     const token = (await signIn(app, { email: `admin@${slug}.test` })).session.accessToken;
@@ -138,7 +141,7 @@ describe('the AI receptionist books appointments', () => {
     const longVisit = await post<AppointmentType>('/api/appointment-types', { name: 'Long visit', durationMinutes: 60 });
     const khan = await post<Provider>('/api/providers', { name: 'Dr Khan', hours: hours('09:00', '12:00'), appointmentTypeIds: [visit.id, longVisit.id] });
     const lee = await post<Provider>('/api/providers', { name: 'Dr Lee', hours: hours('13:00', '16:00'), appointmentTypeIds: [visit.id] });
-    await as(app, token).patch('/api/scheduling/settings', { slotMinutes: 30, minNoticeHours: 0, maxAdvanceDays: 365 }).expect(200);
+    await as(app, token).patch('/api/scheduling/settings', { slotMinutes: 30, minNoticeHours: 0, maxAdvanceDays: 365, ...(identityCheck === 'name_dob_phone' ? { identityCheck } : {}) }).expect(200);
     await as(app, token).patch('/api/scheduling/settings', { aiBookingEnabled: true }).expect(200);
     return { practiceId: seeded.practiceId, token, visit, longVisit, khan, lee };
   }
@@ -151,6 +154,8 @@ describe('the AI receptionist books appointments', () => {
     alpha = await prepare('alpha');
     delta = await prepare('delta');
     gamma = await prepare('gamma');
+    epsilon = await prepare('epsilon', 'name_dob');
+    zeta = await prepare('zeta', 'name_dob');
   });
 
   beforeEach(() => {
@@ -906,6 +911,254 @@ describe('the AI receptionist books appointments', () => {
         // three successes and two failures this hour, cap 5: still identifying callers
         expect(await passCheck(gamma, patient)).toBe(patient.id);
       });
+    });
+  });
+
+  // ------------------------------------------------- the default way of identifying callers
+
+  describe('when callers are identified by name and date of birth (the default)', () => {
+    const nameAndBirth = (patient: Patient, extra: Record<string, string> = {}) => ({ firstName: patient.firstName, lastName: patient.lastName, dateOfBirth: patient.dateOfBirth, ...extra });
+    const toolsOf = (request: ModelRequest) => ({ verify: request.tools.find((t) => t.name === 'verify_patient')!, book: request.tools.find((t) => t.name === 'book_appointment')! });
+    /** The tools and instructions the model got in the first call of a conversation at this practice. */
+    const firstRequestAt = async (p: Practice) => {
+      const { conversationId } = await start(p);
+      script(say('Hello.'));
+      await send(p, conversationId, 'hello');
+      return model.requests.at(-1)!;
+    };
+
+    it('gives the model tools that do not ask for a phone number, and says so in its instructions; the stricter practice is still asked for all four details', async () => {
+      const lenient = await firstRequestAt(epsilon);
+      expect(toolsOf(lenient).verify.parameters).toMatchObject({ required: ['firstName', 'lastName', 'dateOfBirth'] });
+      expect(JSON.stringify(toolsOf(lenient).verify.parameters)).not.toContain('phone');
+      expect(toolsOf(lenient).book.parameters).toMatchObject({ required: ['slotCode', 'firstName', 'lastName', 'dateOfBirth'] });
+      expect(lenient.tools.find((t) => t.name === 'create_staff_task')!.description).toContain('only when the caller asks to leave a message or needs something you cannot do yourself');
+      expect(lenient.system).toContain('Do not ask for a phone number: the system finds one, and tells you if it needs one from the caller.');
+      expect(lenient.system).not.toContain('and phone number (with the country code)');
+      expect(lenient.system).not.toContain('date of birth and phone number');
+
+      const strict = await firstRequestAt(alpha);
+      expect(toolsOf(strict).verify.parameters).toMatchObject({ required: ['firstName', 'lastName', 'dateOfBirth', 'phone'] });
+      expect(toolsOf(strict).book.parameters).toMatchObject({ required: ['slotCode', 'firstName', 'lastName', 'dateOfBirth', 'phone'] });
+      expect(strict.system).toContain('and phone number (with the country code)');
+      expect(strict.system).toContain('date of birth and phone number');
+      expect(strict.system).not.toContain('Do not ask for a phone number: the system finds one, and tells you if it needs one from the caller.');
+    });
+
+    it('identifies a caller by name and date of birth alone, and reads out their appointments', async () => {
+      const patient = await newPatient(epsilon);
+      await staffBook(epsilon, patient.id);
+      const { conversationId } = await start(epsilon);
+      script(callTool('verify_patient', nameAndBirth(patient)));
+      const reply = await send(epsilon, conversationId, `This is ${patient.firstName} ${patient.lastName}. Please check my appointments.`);
+      expect(reply.source).toBe('scripted_booking');
+      expect(reply.reply).toContain('Dr Khan');
+      expect((await conversationRow(conversationId)).verified_patient_id).toBe(patient.id);
+    });
+
+    it('ignores a phone number the model adds', async () => {
+      const patient = await newPatient(epsilon);
+      const { conversationId } = await start(epsilon);
+      script(callTool('verify_patient', nameAndBirth(patient, { phone: '+14155550000' })));
+      await send(epsilon, conversationId, 'this is me', { sayPhone: false });
+      expect((await conversationRow(conversationId)).verified_patient_id).toBe(patient.id);
+    });
+
+    it('gives the same answer for a wrong date of birth, a different name, and someone who exists only in another practice', async () => {
+      const patient = await newPatient(epsilon);
+      const elsewhere = await newPatient(gamma, { firstName: 'Zubair', lastName: 'Elsewhere' });
+      const answers: string[] = [];
+      for (const attempt of [nameAndBirth(patient, { dateOfBirth: '1991-02-04' }), nameAndBirth(patient, { lastName: 'Different' }), nameAndBirth(elsewhere)]) {
+        const { conversationId } = await start(epsilon);
+        script(callTool('verify_patient', attempt), (request) => {
+          answers.push(JSON.stringify(lastResult(request, 'verify_patient')));
+          return say('I am sorry, I could not match those details.');
+        });
+        await send(epsilon, conversationId, 'this is me', { sayPhone: false });
+      }
+      expect(new Set(answers).size).toBe(1);
+      expect(JSON.parse(answers[0]!)).toMatchObject({ matched: false });
+    });
+
+    it('still locks identification after three wrong guesses, even for the right details', async () => {
+      const patient = await newPatient(epsilon);
+      const { conversationId } = await start(epsilon);
+      const wrong = nameAndBirth(patient, { dateOfBirth: '1980-01-01' });
+      let last: Record<string, unknown> | undefined;
+      script(callTool('verify_patient', wrong, 'v1'), callTool('verify_patient', wrong, 'v2'), callTool('verify_patient', wrong, 'v3'), (request) => {
+        last = lastResult(request, 'verify_patient');
+        return say('I am sorry, I could not identify you.');
+      });
+      await send(epsilon, conversationId, 'this is me', { sayPhone: false });
+      expect(last).toMatchObject({ matched: false, locked: true });
+      script(callTool('verify_patient', nameAndBirth(patient)), (request) => {
+        last = lastResult(request, 'verify_patient');
+        return say('I cannot identify you, but I can take a message.');
+      });
+      await send(epsilon, conversationId, 'here are the right details', { sayPhone: false });
+      expect(last).toMatchObject({ matched: false, locked: true });
+      expect((await conversationRow(conversationId)).verified_patient_id).toBeNull();
+    });
+
+    it('never guesses between two patients who share a name and a birthday', async () => {
+      const first = await newPatient(epsilon, { firstName: 'Twin', lastName: 'Sharedname' });
+      await newPatient(epsilon, { firstName: 'Twin', lastName: 'Sharedname' }); // the same name and birthday, another number
+      const { conversationId } = await start(epsilon);
+      let answer: Record<string, unknown> | undefined;
+      script(callTool('verify_patient', nameAndBirth(first)), (request) => {
+        answer = lastResult(request, 'verify_patient');
+        return say('I could not match those details.');
+      });
+      await send(epsilon, conversationId, 'this is me', { sayPhone: false });
+      expect(answer).toMatchObject({ matched: false });
+      expect((await conversationRow(conversationId)).verified_patient_id).toBeNull();
+      expect((await conversationRow(conversationId)).identity_failures).toBe(1);
+    });
+
+    it('books a patient who is on file from name and date of birth alone, without asking for or changing their phone number', async () => {
+      const patient = await newPatient(epsilon);
+      const { conversationId } = await start(epsilon);
+      await offer(epsilon, conversationId);
+      script(callTool('book_appointment', { slotCode: 'S1', ...nameAndBirth(patient) }));
+      const reply = await send(epsilon, conversationId, 'the first one please', { sayPhone: false });
+      expect(reply.source).toBe('scripted_booking');
+      const patients = await patientRows(epsilon.practiceId, patient.lastName);
+      expect(patients).toHaveLength(1); // not added a second time
+      expect(patients[0]!.phone).toBe(patient.phone);
+      expect(await appointmentsOf(conversationId)).toMatchObject([{ patient_id: patient.id, status: 'booked' }]);
+    });
+
+    describe('booking cannot be used to find out who is a patient', () => {
+      /** The model tries to book for someone, and is refused; what it was told is returned. */
+      const tryBooking = async (p: Practice, conversationId: string, who: Record<string, string>, text = 'the first one') => {
+        let told: Record<string, unknown> | undefined;
+        script(callTool('book_appointment', { slotCode: 'S1', ...who }), (request) => {
+          told = lastResult(request, 'book_appointment');
+          return say('I could not book that.');
+        });
+        const reply = await send(p, conversationId, text, { sayPhone: false });
+        return { told, reply };
+      };
+      const stranger = (n: number) => ({ firstName: `Stranger${n}`, lastName: `Nobody${n}`, dateOfBirth: `1980-01-0${n}` });
+      const failures = async (conversationId: string) => (await conversationRow(conversationId)).identity_failures;
+
+      it('counts someone who is not on file as a failed identity check, once per name and birth date, and locks booking for everyone in the conversation after three', async () => {
+        const known = await newPatient(epsilon);
+        const { conversationId } = await start(epsilon);
+        await offer(epsilon, conversationId);
+
+        await tryBooking(epsilon, conversationId, stranger(1));
+        expect(await failures(conversationId)).toBe(1);
+        await tryBooking(epsilon, conversationId, stranger(1)); // the same person again: not a new guess
+        expect(await failures(conversationId)).toBe(1);
+        await tryBooking(epsilon, conversationId, stranger(2));
+        expect(await failures(conversationId)).toBe(2);
+        await tryBooking(epsilon, conversationId, stranger(3));
+        expect(await failures(conversationId)).toBe(3);
+        // the stored record of the refusal (not shown to the model) is what the practice-wide cap counts
+        expect((await invocations(conversationId, 'book_appointment')).at(-1)!.result).toMatchObject({ matched: false, identityKey: expect.any(String) });
+
+        // Locked: now even a patient who is on file is refused, so the difference cannot be used to find out who is one.
+        const afterLock = await tryBooking(epsilon, conversationId, nameAndBirth(known));
+        expect(afterLock.told).toMatchObject({ locked: true });
+        expect(await appointmentsOf(conversationId)).toEqual([]);
+        expect((await audit('conversation.identity_locked', epsilon.practiceId)).filter((entry) => entry.target_id === conversationId)).toHaveLength(1);
+      });
+
+      it('does not count someone who is on file, however often they book', async () => {
+        const known = await newPatient(epsilon);
+        const { conversationId } = await start(epsilon);
+        await offer(epsilon, conversationId);
+        script(callTool('book_appointment', { slotCode: 'S1', ...nameAndBirth(known) }));
+        expect((await send(epsilon, conversationId, 'the first one', { sayPhone: false })).source).toBe('scripted_booking');
+        expect(await failures(conversationId)).toBe(0);
+      });
+
+      it('counts a new patient exactly once, however many tries it takes to get a number, and verifying works afterwards', async () => {
+        const who = person({ firstName: 'Once', lastName: 'Counted' });
+        const { conversationId } = await start(epsilon);
+        await owner.updateTable('conversations').set({ caller_number: '+16505550188' }).where('id', '=', conversationId).execute(); // caller ID
+        await offer(epsilon, conversationId);
+        await tryBooking(epsilon, conversationId, { firstName: who.firstName, lastName: who.lastName, dateOfBirth: who.dateOfBirth }, 'I am Once Counted'); // birth date not said yet
+        script(callTool('book_appointment', { slotCode: 'S1', firstName: who.firstName, lastName: who.lastName, dateOfBirth: who.dateOfBirth }));
+        expect((await send(epsilon, conversationId, 'I was born on 3 February 1991.', { sayPhone: false })).source).toBe('scripted_booking');
+        expect(await failures(conversationId)).toBe(1);
+
+        script(callTool('verify_patient', { firstName: who.firstName, lastName: who.lastName, dateOfBirth: who.dateOfBirth }));
+        await send(epsilon, conversationId, 'please check my appointments', { sayPhone: false });
+        expect((await conversationRow(conversationId)).verified_patient_id).not.toBeNull();
+      });
+
+      it('stops booking for everyone in the practice once the practice-wide cap is reached, and says so once', async () => {
+        await rules(zeta, { identityFailureCapPerHour: 5 });
+        const known = await newPatient(zeta);
+        for (let n = 1; n <= 5; n += 1) {
+          const { conversationId } = await start(zeta);
+          await offer(zeta, conversationId);
+          await tryBooking(zeta, conversationId, stranger(n));
+        }
+        // five failures this hour: a patient on file is refused too, in a fresh conversation
+        const fresh = await start(zeta);
+        await offer(zeta, fresh.conversationId);
+        const refused = await tryBooking(zeta, fresh.conversationId, nameAndBirth(known));
+        expect(refused.told).toMatchObject({ unavailable: true });
+        expect(await appointmentsOf(fresh.conversationId)).toEqual([]);
+        expect(await audit('scheduling.identity_cap_reached', zeta.practiceId)).toHaveLength(1);
+      });
+    });
+
+    it('adds a new patient with the number they already said in full, without asking again, when there is no caller ID', async () => {
+      const who = person({ firstName: 'Vera', lastName: 'Volunteer' });
+      const { conversationId } = await start(epsilon);
+      await offer(epsilon, conversationId);
+      script(callTool('book_appointment', { slotCode: 'S1', firstName: who.firstName, lastName: who.lastName, dateOfBirth: who.dateOfBirth }));
+      const reply = await send(epsilon, conversationId, `I am Vera Volunteer, born 3 February 1991, phone +1 415 555 0166. The first one please.`, { sayPhone: false });
+      expect(reply.source).toBe('scripted_booking');
+      expect(await patientRows(epsilon.practiceId, who.lastName)).toMatchObject([{ phone: '+14155550166', created_by_type: 'ai' }]);
+    });
+
+    it('adds a new patient with the number they are calling from, when the call has caller ID, without asking for one', async () => {
+      const who = person({ firstName: 'Calla', lastName: 'Callerid' });
+      const { conversationId } = await start(epsilon);
+      await owner.updateTable('conversations').set({ caller_number: '+16505550177' }).where('id', '=', conversationId).execute(); // what a phone call records
+      await offer(epsilon, conversationId);
+      script(callTool('book_appointment', { slotCode: 'S1', firstName: who.firstName, lastName: who.lastName, dateOfBirth: who.dateOfBirth }));
+      const reply = await send(epsilon, conversationId, 'I was born on 3 February 1991.', { sayPhone: false });
+      expect(reply.source).toBe('scripted_booking');
+      expect(await patientRows(epsilon.practiceId, who.lastName)).toMatchObject([{ phone: '+16505550177', created_by_type: 'ai' }]);
+    });
+
+    it('adds a new patient only with a birth date the caller said and a number to call: it asks for the number when there is no caller ID', async () => {
+      const who = person({ firstName: 'Nora', lastName: 'Freshman' });
+      const withoutPhone = { firstName: who.firstName, lastName: who.lastName, dateOfBirth: who.dateOfBirth };
+      const { conversationId } = await start(epsilon);
+      await offer(epsilon, conversationId);
+      let refusal: Record<string, unknown> | undefined;
+      const refusedWith = (reply: string) => (request: ModelRequest) => {
+        refusal = lastResult(request, 'book_appointment');
+        return say(reply);
+      };
+
+      script(callTool('book_appointment', { slotCode: 'S1', ...withoutPhone }), refusedWith('Could you tell me your date of birth?'));
+      await send(epsilon, conversationId, `I am ${who.firstName} ${who.lastName}`, { sayPhone: false });
+      expect(String(refusal!['error'])).toContain('is not what the caller said');
+      expect(await patientRows(epsilon.practiceId, who.lastName)).toEqual([]);
+
+      script(callTool('book_appointment', { slotCode: 'S1', ...withoutPhone }), refusedWith('May I have a number to call you on?'));
+      await send(epsilon, conversationId, 'I was born on 3 February 1991.', { sayPhone: false });
+      expect(String(refusal!['error'])).toContain('There is no number to call this caller on');
+      expect(await patientRows(epsilon.practiceId, who.lastName)).toEqual([]);
+
+      script(callTool('book_appointment', { slotCode: 'S1', ...withoutPhone, phone: '+14155550000' }), refusedWith('Could you repeat your number?'));
+      await send(epsilon, conversationId, 'my number is 415 555 0199', { sayPhone: false });
+      expect(String(refusal!['error'])).toContain('is not what the caller said'); // a number the caller did not say is still refused
+      expect(await patientRows(epsilon.practiceId, who.lastName)).toEqual([]);
+
+      script(callTool('book_appointment', { slotCode: 'S1', ...who }));
+      const reply = await send(epsilon, conversationId, 'thank you');
+      expect(reply.source).toBe('scripted_booking');
+      expect(await patientRows(epsilon.practiceId, who.lastName)).toMatchObject([{ phone: who.phone, created_by_type: 'ai' }]);
+      expect(await appointmentsOf(conversationId)).toHaveLength(1);
     });
   });
 

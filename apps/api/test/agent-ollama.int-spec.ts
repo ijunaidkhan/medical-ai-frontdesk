@@ -66,6 +66,7 @@ describe('the AI receptionist with the Ollama adapter', () => {
         greeting: 'Thank you for calling Alpha Clinic.',
         emergencyMessage: 'If this is a medical emergency, hang up and call 911 now.',
         crisisMessage: 'If you are thinking about suicide, call or text 988 now.',
+        messageContact: 'name_phone', // these tests are about how a model's tool text is read, with the number as the contact detail
         businessHours: ALL_DAY,
       })
       .expect(200);

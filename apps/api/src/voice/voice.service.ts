@@ -1,19 +1,23 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { aiReadinessProblems, composeGreeting, PHONE_PATTERN, type AgentReply } from '@frontdesk/shared';
+import { aiReadinessProblems, composeGreeting, PHONE_PATTERN, type AgentReply, type StartWebCallResponse } from '@frontdesk/shared';
 import { sql } from 'kysely';
 import { PinoLogger } from 'nestjs-pino';
 import { AgentService } from '../agent/agent.service.js';
 import { writeAuditLog } from '../audit/audit-log.js';
+import type { AuthContext } from '../auth/auth-context.js';
+import type { RequestMeta } from '../common/request-meta.js';
 import type { EnvironmentVariables } from '../config/env.validation.js';
 import { AiService } from '../ai/ai.service.js';
 import { LANGUAGE_MODEL, type LanguageModel } from '../agent/model/language-model.js';
 import { DB, type Db } from '../database/database.module.js';
 import { withPracticeContext } from '../database/practice-context.js';
 import { PhoneNumbersService } from './phone-numbers.service.js';
+import { relayPathFor } from './relay-address.js';
 import { RelayTokenService } from './relay-token.js';
 import { connectRelayResponse, hangupResponse, sayAndHangupResponse } from './twiml.js';
 import type { TwilioParams } from './twilio-signature.js';
+import { newWebCallSid } from './web-call.js';
 
 /** Twilio's call ids are letters and digits; the database allows up to 64. */
 const CALL_SID = /^[A-Za-z0-9]{1,64}$/;
@@ -110,6 +114,20 @@ export class VoiceService {
         .executeTakeFirst();
       return row && row.channel === 'phone' && row.status === 'active' ? row.provider_call_sid : null;
     });
+  }
+
+  /**
+   * Starts a web-phone call for the signed-in staff member (VOICE_PROVIDER=dev only; otherwise it does not exist).
+   * It makes the conversation with the same checks as a test chat, and returns the one-use address of its voice session.
+   */
+  async startWebCall(auth: AuthContext, meta: RequestMeta): Promise<StartWebCallResponse> {
+    if (this.config.get('VOICE_PROVIDER', { infer: true }) !== 'dev') {
+      throw new NotFoundException();
+    }
+    const callSid = newWebCallSid();
+    const started = await this.agent.startWebCall(auth, meta, callSid);
+    const token = await this.relayTokens.sign({ conversationId: started.conversationId, practiceId: auth.practiceId });
+    return { ...started, callSid, sessionPath: relayPathFor(token) };
   }
 
   /** The TwiML answer for an incoming call. Never throws: any failure becomes a spoken message. */
@@ -224,7 +242,7 @@ export class VoiceService {
     const base = this.config.get('PUBLIC_BASE_URL', { infer: true }) ?? '';
     const token = await this.relayTokens.sign({ conversationId, practiceId });
     return connectRelayResponse({
-      relayUrl: `${base.replace(/^http/, 'ws')}/api/voice/relay?token=${token}`,
+      relayUrl: `${base.replace(/^http/, 'ws')}${relayPathFor(token)}`,
       actionUrl: `${base}/api/voice/action`,
       greeting,
       ttsProvider: this.config.get('VOICE_TTS_PROVIDER', { infer: true }),

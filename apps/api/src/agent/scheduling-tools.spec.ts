@@ -1,4 +1,4 @@
-import { matchType, normalizePhone } from './scheduling-tools.js';
+import { matchType } from './scheduling-tools.js';
 
 const types = [{ name: 'Follow-up' }, { name: 'Long visit' }, { name: 'Visit' }, { name: 'New patient visit' }];
 const name = (wanted: string) => matchType(types, wanted)?.name;
@@ -24,12 +24,5 @@ describe('matchType (the visit the model meant)', () => {
 
   it('refuses to guess between two names that both contain what was said', () => {
     expect(matchType([{ name: 'Short visit' }, { name: 'Long visit' }], 'visi')).toBeUndefined();
-  });
-});
-
-describe('normalizePhone', () => {
-  it('removes the spaces, dashes, dots and brackets people and models put in phone numbers', () => {
-    expect(normalizePhone('+1 (415) 555-0133')).toBe('+14155550133');
-    expect(normalizePhone('+92.300.123.4567')).toBe('+923001234567');
   });
 });

@@ -52,6 +52,15 @@ describe('ConversationsPage', () => {
     expect(rows[1]!.textContent).toContain('5 Oct 2026, 09:00');
   });
 
+  it('tells a call made from the web phone (started by a staff member) from a real call', async () => {
+    await setup([summary('c2', { channel: 'phone', outcome: 'abandoned', startedByName: 'Jane Smith' }), summary('c1', { channel: 'phone', outcome: 'abandoned', startedByName: null })]);
+    const rows = [...root().querySelectorAll<HTMLAnchorElement>('a.row')];
+    expect(rows[0]!.textContent).toContain('Phone call (web phone test)');
+    expect(rows[0]!.textContent).toContain('by Jane Smith');
+    expect(rows[1]!.textContent).toContain('Phone call');
+    expect(rows[1]!.textContent).not.toContain('web phone test');
+  });
+
   it('loads more with the page position the server gave', async () => {
     await setup([summary('c1')], 'next');
     [...root().querySelectorAll('button')].find((b) => b.textContent?.includes('Load more'))!.click();

@@ -122,6 +122,7 @@ describe('scheduling foundations', () => {
         aiBookingEnabled: false,
         timeFormat: '12h',
         identityFailureCapPerHour: 30,
+        identityCheck: 'name_dob',
         updatedAt: null,
       });
       expect(await owner.selectFrom('scheduling_settings').select('practice_id').where('practice_id', '=', beta.practiceId).executeTakeFirst()).toBeUndefined(); // reading creates nothing
@@ -148,8 +149,19 @@ describe('scheduling foundations', () => {
       expect(await get<SchedulingSettings>('/api/scheduling/settings')).toMatchObject({ timeFormat: '12h', identityFailureCapPerHour: 30 });
     });
 
+    it('what identifies a caller can be switched between name + birth date and all three details, and is audited by field name', async () => {
+      const saved = (await rules({ identityCheck: 'name_dob_phone' })).body as SchedulingSettings;
+      expect(saved.identityCheck).toBe('name_dob_phone');
+      expect((await audit('scheduling.settings_updated')).at(-1)!.metadata).toEqual({ fields: ['identityCheck'] });
+      await patch('/api/scheduling/settings', { identityCheck: 'name_dob_phone' }).expect(400); // nothing changed
+      await patch('/api/scheduling/settings', { identityCheck: 'name_dob' }, token.staff).expect(403); // staff cannot change it
+      expect((await rules({ identityCheck: 'name_dob' })).body).toMatchObject({ identityCheck: 'name_dob' });
+    });
+
     it.each([
       ['a slot length that is not offered', { slotMinutes: 7 }],
+      ['an identity check that does not exist', { identityCheck: 'phone_only' }],
+      ['an identity check as a number', { identityCheck: 1 }],
       ['a slot length that is not a number', { slotMinutes: 'quarter' }],
       ['negative notice', { minNoticeHours: -1 }],
       ['more than 720 hours of notice', { minNoticeHours: 721 }],

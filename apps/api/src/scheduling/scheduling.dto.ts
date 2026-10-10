@@ -5,6 +5,7 @@ import {
   AVAILABILITY_LIMIT_MAX,
   CANCEL_MIN_HOURS_MAX,
   IDENTITY_FAILURE_CAP_MAX,
+  IDENTITY_CHECKS,
   IDENTITY_FAILURE_CAP_MIN,
   MAX_ADVANCE_DAYS_MAX,
   MAX_APPOINTMENT_TYPES,
@@ -19,6 +20,7 @@ import {
   type CreateProviderRequest,
   type CreateTimeOffRequest,
   type SlotMinutes,
+  type IdentityCheck,
   type TimeFormat,
   type UpdateAppointmentTypeRequest,
   type UpdateProviderRequest,
@@ -96,6 +98,10 @@ export class UpdateSchedulingSettingsDto implements UpdateSchedulingSettingsRequ
   @Min(IDENTITY_FAILURE_CAP_MIN)
   @Max(IDENTITY_FAILURE_CAP_MAX)
   identityFailureCapPerHour?: number;
+
+  @ValidateIf(provided)
+  @IsIn(IDENTITY_CHECKS)
+  identityCheck?: IdentityCheck;
 }
 
 // ----------------------------------------------------------------- providers

@@ -175,6 +175,22 @@
         </div>
       </section>
 
+      <section class="card" aria-labelledby="messages-title">
+        <h2 id="messages-title">Taking a message</h2>
+        <div class="field">
+          <label for="message-contact">When the AI takes a message for your team, it asks for</label>
+          <select id="message-contact" class="input" [disabled]="!canEdit()" (change)="chooseMessageContact($event)" aria-describedby="message-contact-help">
+            @for (contact of messageContacts; track contact) {
+              <option [value]="contact" [selected]="contact === d.messageContact">{{ messageContactLabels[contact] }}</option>
+            }
+          </select>
+          <p id="message-contact-help" class="muted hint">
+            With name and date of birth, callers are not asked for a phone number, which speech recognition often gets wrong. The number to call back is the one
+            the caller is calling from (on a real call) or the one on their patient record; the AI asks for a number only when neither exists.
+          </p>
+        </div>
+      </section>
+
       @if (saveProblems().length > 0) {
         <div class="alert alert-error" role="alert">
           <p>The changes were not saved:</p>

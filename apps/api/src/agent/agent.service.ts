@@ -1,8 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import {
+  chatStartProblems,
   composeGreeting,
-  CRISIS_MESSAGE_MIN_LENGTH,
-  EMERGENCY_MESSAGE_MIN_LENGTH,
   isOpenAt,
   type AgentReply,
   type ConversationEscalation,
@@ -115,20 +114,25 @@ export class AgentService {
 
   // ------------------------------------------------------------------ start
 
-  async startTestConversation(auth: AuthContext, meta: RequestMeta): Promise<StartConversationResponse> {
+  startTestConversation(auth: AuthContext, meta: RequestMeta): Promise<StartConversationResponse> {
+    return this.start(auth, meta, 'test_chat', null);
+  }
+
+  /**
+   * A web-phone call: a phone conversation started by a signed-in staff member, with no real
+   * number behind it (the browser plays the phone provider's part). `callSid` is its call id.
+   */
+  startWebCall(auth: AuthContext, meta: RequestMeta, callSid: string): Promise<StartConversationResponse> {
+    return this.start(auth, meta, 'phone', callSid);
+  }
+
+  private async start(auth: AuthContext, meta: RequestMeta, channel: AgentChannel, callSid: string | null): Promise<StartConversationResponse> {
     if (!this.model.configured) {
       throw new ServiceUnavailableException('The AI model is not set up yet. Ask the system administrator to configure it.');
     }
     return this.inPractice(auth.practiceId, auth.userId, async (trx) => {
       const { context } = await this.loadContext(trx, auth.practiceId);
-      const problems: string[] = [];
-      if (context.config.greeting.trim().length === 0) problems.push('Write a greeting');
-      if (context.config.emergencyMessage.trim().length < EMERGENCY_MESSAGE_MIN_LENGTH) {
-        problems.push('Write the emergency message callers will hear (who to call in a medical emergency)');
-      }
-      if (context.config.crisisMessage.trim().length < CRISIS_MESSAGE_MIN_LENGTH) {
-        problems.push('Write the crisis message callers will hear if they mention suicide or self-harm (for example, the 988 line in the US)');
-      }
+      const problems = chatStartProblems(context.config);
       if (problems.length > 0) {
         throw new ConflictException(problems);
       }
@@ -136,7 +140,7 @@ export class AgentService {
       const greeting = composeGreeting(context.config.greeting);
       const { id } = await trx
         .insertInto('conversations')
-        .values({ practice_id: auth.practiceId, channel: 'test_chat', started_by: auth.userId, model: this.model.name, turn_count: 1 })
+        .values({ practice_id: auth.practiceId, channel, provider_call_sid: callSid, started_by: auth.userId, model: this.model.name, turn_count: 1 })
         .returning('id')
         .executeTakeFirstOrThrow();
       await this.insertTurn(trx, auth.practiceId, id, 1, 'ai', 'greeting', greeting, null, null);
@@ -148,7 +152,7 @@ export class AgentService {
         targetId: id,
         requestId: meta.requestId,
         ip: meta.ip,
-        metadata: { channel: 'test_chat' },
+        metadata: { channel },
       });
       return { conversationId: id, greeting };
     });
@@ -324,7 +328,16 @@ export class AgentService {
     const state: TurnState = { ended: false, handoffTargetId: null, createdTaskIds: [], lines: [] };
     const runtime: ToolRuntime = { practiceId: auth.practiceId, conversationId, context, meta, state, tasksBefore: turn.tasksBefore, callerText: turn.text };
     const isOpen = isOpenAt(context.config.businessHours, context.practice.timezone, new Date());
-    const system = buildSystemPrompt({ practiceName: context.practice.name, isOpen, mode, channel, scheduling: context.scheduling.enabled, bookingNotes: turn.bookingNotes });
+    const system = buildSystemPrompt({
+      practiceName: context.practice.name,
+      isOpen,
+      mode,
+      channel,
+      scheduling: context.scheduling.enabled,
+      messageContact: context.config.messageContact,
+      identityCheck: context.scheduling.identityCheck,
+      bookingNotes: turn.bookingNotes,
+    });
     const messages: ModelMessage[] = [...turn.history, { role: 'user', text: turn.text }];
 
     let draft = '';
@@ -334,7 +347,14 @@ export class AgentService {
     const runRounds = async (): Promise<string> => {
       for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
         // On the last round no tools are offered, so the model has to answer in words.
-        const response = await this.ask({ system, messages, tools: round === MAX_TOOL_ROUNDS ? [] : this.tools.definitions(mode, context.scheduling.enabled) });
+        const response = await this.ask({
+          system,
+          messages,
+          tools:
+            round === MAX_TOOL_ROUNDS
+              ? []
+              : this.tools.definitions(mode, { schedulingEnabled: context.scheduling.enabled, messageContact: context.config.messageContact, identityCheck: context.scheduling.identityCheck }),
+        });
         if (response.toolCalls.length === 0) {
           return response.text;
         }
@@ -558,7 +578,7 @@ export class AgentService {
       context: {
         practice,
         targets,
-        scheduling: { enabled: scheduling.aiBookingEnabled },
+        scheduling: { enabled: scheduling.aiBookingEnabled, identityCheck: scheduling.identityCheck },
         config: {
           greeting: settings.greeting,
           emergencyMessage: settings.emergencyMessage,
@@ -569,6 +589,7 @@ export class AgentService {
           afterHoursTransferTargetId: settings.afterHoursTransferTargetId,
           businessHours: settings.businessHours,
           extraUrgentPhrases: settings.extraUrgentPhrases,
+          messageContact: settings.messageContact,
         },
       },
     };

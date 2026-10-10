@@ -22,6 +22,7 @@ interface TaskRow {
   details: string | null;
   contact_name: string | null;
   contact_phone: string | null;
+  contact_date_of_birth: string | null;
   created_by_type: 'user' | 'ai';
   created_by: string | null;
   conversation_id: string | null;
@@ -45,6 +46,7 @@ function toTask(row: TaskRow): Task {
     details: row.details,
     contactName: row.contact_name,
     contactPhone: row.contact_phone,
+    contactDateOfBirth: row.contact_date_of_birth,
     createdBy:
       row.created_by_type === 'ai'
         ? { kind: 'ai' }
@@ -155,6 +157,7 @@ export class TasksService {
         details: orNull(input.details),
         contact_name: orNull(input.contactName),
         contact_phone: orNull(input.contactPhone),
+        contact_date_of_birth: input.contactDateOfBirth ?? null,
         created_by_type: actor.kind,
         created_by: actor.kind === 'user' ? actor.userId : null,
         assigned_to: input.assignedTo ?? null,
@@ -279,6 +282,8 @@ export class TasksService {
         't.details',
         't.contact_name',
         't.contact_phone',
+        // A date of birth is read as text: the driver would turn a `date` into a JS Date in the server's own time zone.
+        sql<string | null>`t.contact_date_of_birth::text`.as('contact_date_of_birth'),
         't.created_by_type',
         't.created_by',
         't.conversation_id',

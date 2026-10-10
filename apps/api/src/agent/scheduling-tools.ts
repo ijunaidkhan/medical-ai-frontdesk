@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { BadRequestException, ConflictException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
-import type { TimeFormat } from '@frontdesk/shared';
+import type { IdentityCheck, TimeFormat } from '@frontdesk/shared';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { sql, type Transaction } from 'kysely';
 import { writeAuditLog } from '../audit/audit-log.js';
 import type { Database } from '../database/database.types.js';
-import { CreatePatientDto } from '../scheduling/appointments.dto.js';
+import { CreatePatientDto, PatientIdentityDto } from '../scheduling/appointments.dto.js';
 import { bookedSentence, cancelledSentence, clockParts, formatWhen, listSentence, movedSentence, oneLine, type AppointmentFacts } from '../scheduling/appointment-text.js';
 import { AppointmentsService, CancellationWindowError } from '../scheduling/appointments.service.js';
 import { PatientsService } from '../scheduling/patients.service.js';
@@ -14,7 +14,8 @@ import { SchedulingService } from '../scheduling/scheduling.service.js';
 import { localDate, zonedInstant } from '../scheduling/zoned-time.js';
 import type { ModelToolDefinition } from './model/language-model.js';
 import { stripControl } from './sanitize.js';
-import { callerSaidPhone, phoneNotSaidMessage } from './spoken-phone.js';
+import { callerSaidDate, dateNotSaidMessage } from './spoken-date.js';
+import { callerSaidPhone, callerVolunteeredPhone, normalizePhone, PHONE_FORMAT_NOTE, phoneNotSaidMessage } from './spoken-phone.js';
 import type { ToolResult, ToolRuntime } from './tools.js';
 
 type Trx = Transaction<Database>;
@@ -34,14 +35,55 @@ const APPOINTMENT_SOURCES = ['list_my_appointments', 'verify_patient'] as const;
 
 export const SCHEDULING_TOOL_NAMES = ['list_appointment_types', 'find_available_slots', 'verify_patient', 'book_appointment', 'list_my_appointments', 'cancel_appointment', 'reschedule_appointment'] as const;
 
-const PATIENT_DETAILS = {
+const NAME_AND_BIRTH_DATE = {
   firstName: { type: 'string', description: 'The caller\'s first name.' },
   lastName: { type: 'string', description: 'The caller\'s last name.' },
   dateOfBirth: { type: 'string', description: 'Date of birth as YYYY-MM-DD, for example 1990-05-17.' },
-  phone: { type: 'string', description: 'The phone number the caller said, written as a plus sign, the country code, then the number, with no spaces.' },
 } as const;
+const PHONE_SAID = 'The phone number the caller said, written as a plus sign, the country code, then the number, with no spaces.';
 
-const DEFINITIONS: Record<(typeof SCHEDULING_TOOL_NAMES)[number], ModelToolDefinition> = {
+/**
+ * Who a caller is, as the practice chose to check it: name and date of birth, or also the phone number (stricter).
+ * A booking needs a number only for someone new, and then the system finds it (the caller's own number on a call) or says so.
+ */
+function verifyPatientTool(identityCheck: IdentityCheck): ModelToolDefinition {
+  const strict = identityCheck === 'name_dob_phone';
+  return {
+    name: 'verify_patient',
+    description: strict
+      ? 'Check who the caller is, so they can hear or change their own appointments. Needs all four details. You are told only whether they matched. Do not use it to book a new appointment.'
+      : 'Check who the caller is, so they can hear or change their own appointments. Needs their first name, last name and date of birth (not a phone number). You are told only whether they matched. Do not use it to book a new appointment.',
+    parameters: {
+      type: 'object',
+      properties: strict ? { ...NAME_AND_BIRTH_DATE, phone: { type: 'string', description: PHONE_SAID } } : NAME_AND_BIRTH_DATE,
+      required: strict ? ['firstName', 'lastName', 'dateOfBirth', 'phone'] : ['firstName', 'lastName', 'dateOfBirth'],
+      additionalProperties: false,
+    },
+  };
+}
+
+function bookAppointmentTool(identityCheck: IdentityCheck): ModelToolDefinition {
+  const strict = identityCheck === 'name_dob_phone';
+  return {
+    name: 'book_appointment',
+    description: strict
+      ? 'Book one of the times returned by find_available_slots for the caller. Needs the slot code the caller chose and the caller\'s first name, last name, date of birth and phone. The system confirms the booking itself; you do not need to.'
+      : 'Book one of the times returned by find_available_slots for the caller. Needs the slot code the caller chose and the caller\'s first name, last name and date of birth. Do not ask for a phone number: the system finds one, and tells you if it needs one from the caller. The system confirms the booking itself; you do not need to.',
+    parameters: {
+      type: 'object',
+      properties: {
+        slotCode: { type: 'string', description: 'The code of the chosen time, for example S1.' },
+        ...NAME_AND_BIRTH_DATE,
+        phone: { type: 'string', description: strict ? PHONE_SAID : `Only when the system has asked for a phone number. ${PHONE_SAID}` },
+      },
+      required: strict ? ['slotCode', 'firstName', 'lastName', 'dateOfBirth', 'phone'] : ['slotCode', 'firstName', 'lastName', 'dateOfBirth'],
+      additionalProperties: false,
+    },
+  };
+}
+
+type ToolName = (typeof SCHEDULING_TOOL_NAMES)[number];
+const DEFINITIONS: Record<Exclude<ToolName, 'verify_patient' | 'book_appointment'>, ModelToolDefinition> = {
   list_appointment_types: {
     name: 'list_appointment_types',
     description: 'List the kinds of appointment a caller can book (name and length). Use when the caller has not said what kind of visit they want.',
@@ -62,18 +104,6 @@ const DEFINITIONS: Record<(typeof SCHEDULING_TOOL_NAMES)[number], ModelToolDefin
       required: [],
       additionalProperties: false,
     },
-  },
-  verify_patient: {
-    name: 'verify_patient',
-    description:
-      'Check who the caller is, so they can hear or change their own appointments. Needs all four details. You are told only whether they matched. Do not use it to book a new appointment.',
-    parameters: { type: 'object', properties: PATIENT_DETAILS, required: ['firstName', 'lastName', 'dateOfBirth', 'phone'], additionalProperties: false },
-  },
-  book_appointment: {
-    name: 'book_appointment',
-    description:
-      'Book one of the times returned by find_available_slots for the caller. Needs the slot code the caller chose and the caller\'s first name, last name, date of birth and phone. The system confirms the booking itself; you do not need to.',
-    parameters: { type: 'object', properties: { slotCode: { type: 'string', description: 'The code of the chosen time, for example S1.' }, ...PATIENT_DETAILS }, required: ['slotCode', 'firstName', 'lastName', 'dateOfBirth', 'phone'], additionalProperties: false },
   },
   list_my_appointments: {
     name: 'list_my_appointments',
@@ -100,14 +130,19 @@ const DEFINITIONS: Record<(typeof SCHEDULING_TOOL_NAMES)[number], ModelToolDefin
 
 const rejected = (result: Record<string, unknown>): ToolResult => ({ status: 'rejected', result });
 
+/** What the model is told once identification is locked, or the practice's cap is reached: the same words however it came about. */
+const LOCKED = { matched: false, locked: true, error: 'The caller could not be identified. Do not try again. Offer to take a message for the team with create_staff_task.' };
+const UNAVAILABLE = { matched: false, unavailable: true, error: 'Identifying callers is not available right now. Offer to take a message for the team with create_staff_task.' };
+
+/** A short fingerprint of "this name and birth date", to count one stranger asked about twice in a conversation once. */
+const identityKey = (firstName: string, lastName: string, dateOfBirth: string): string =>
+  createHash('sha256').update(`${firstName} ${lastName}|${dateOfBirth}`.toLowerCase().replace(/\s+/g, ' ')).digest('hex').slice(0, 24);
+
 const argText = (args: Record<string, unknown>, key: string): string | undefined => {
   const value = args[key];
   const text = typeof value === 'string' ? stripControl(value).trim() : '';
   return text !== '' ? text.slice(0, 200) : undefined;
 };
-
-/** Speech recognition and models write phone numbers with spaces and dashes; the stored form has none. */
-export const normalizePhone = (text: string): string => text.replace(/[\s\-().]/g, '');
 
 /** A real calendar date written YYYY-MM-DD, or null. */
 function parseDate(text: string | undefined): { year: number; month: number; day: number } | null {
@@ -172,8 +207,8 @@ export class SchedulingTools {
     private readonly patients: PatientsService,
   ) {}
 
-  definitions(): ModelToolDefinition[] {
-    return SCHEDULING_TOOL_NAMES.map((name) => DEFINITIONS[name]);
+  definitions(identityCheck: IdentityCheck): ModelToolDefinition[] {
+    return SCHEDULING_TOOL_NAMES.map((name) => (name === 'verify_patient' ? verifyPatientTool(identityCheck) : name === 'book_appointment' ? bookAppointmentTool(identityCheck) : DEFINITIONS[name]));
   }
 
   handles(name: string): boolean {
@@ -193,9 +228,9 @@ export class SchedulingTools {
       case 'find_available_slots':
         return this.findSlots(trx, runtime, args, format);
       case 'verify_patient':
-        return this.verify(trx, runtime, args, settings.identityFailureCapPerHour, format);
+        return this.verify(trx, runtime, args, settings.identityFailureCapPerHour, format, settings.identityCheck);
       case 'book_appointment':
-        return this.book(trx, runtime, args, format);
+        return this.book(trx, runtime, args, format, settings.identityCheck, settings.identityFailureCapPerHour);
       case 'list_my_appointments':
         return this.listMine(trx, runtime, format);
       case 'cancel_appointment':
@@ -333,34 +368,27 @@ export class SchedulingTools {
 
   // ----------------------------------------------------------- who is calling
 
-  private async verify(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, capPerHour: number, format: TimeFormat): Promise<ToolResult> {
-    const conversation = await trx.selectFrom('conversations').select(['identity_failures']).where('id', '=', runtime.conversationId).forUpdate().executeTakeFirstOrThrow();
+  private async verify(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, capPerHour: number, format: TimeFormat, identityCheck: IdentityCheck): Promise<ToolResult> {
     // Locked: no more checks in this conversation, and no hint of what was wrong with any earlier one.
-    if (conversation.identity_failures >= MAX_IDENTITY_FAILURES) {
-      return rejected({ matched: false, locked: true, error: 'The caller could not be identified. Do not try again. Offer to take a message for the team with create_staff_task.' });
-    }
-    const details = this.details(args);
+    if (await this.isLocked(trx, runtime)) return rejected(LOCKED);
+    const strict = identityCheck === 'name_dob_phone';
+    const details = strict ? this.details(args) : this.identity(args);
     if ('problems' in details) {
       return rejected({ error: 'Those details are not complete or not valid. Ask the caller again for the missing ones.', problems: details.problems });
     }
     // A model that mistyped the number is not a caller guessing: refused without counting as a failed check.
-    const misheard = await this.phoneNotSaid(trx, runtime, details.dto.phone);
-    if (misheard) return misheard;
-
-    // Many conversations together can still be used to guess: a cap for the whole practice per hour.
-    const recent = await trx
-      .selectFrom('tool_invocations')
-      .select((eb) => eb.fn.countAll<string>().as('failures'))
-      .where('tool_name', '=', 'verify_patient')
-      .where('created_at', '>', sql<Date>`now() - interval '1 hour'`)
-      .where(sql<boolean>`result ->> 'matched' = 'false'`)
-      .executeTakeFirstOrThrow();
-    if (Number(recent.failures) >= capPerHour) {
-      await this.noteCapReached(trx, runtime, capPerHour);
-      return rejected({ matched: false, unavailable: true, error: 'Identifying callers is not available right now. Offer to take a message for the team with create_staff_task.' });
+    if (strict) {
+      const misheard = await this.phoneNotSaid(trx, runtime, (details.dto as CreatePatientDto).phone);
+      if (misheard) return misheard;
     }
 
-    const patient = await this.patients.findMatch(trx, details.dto);
+    // Many conversations together can still be used to guess: a cap for the whole practice per hour.
+    if (await this.capReached(trx, runtime, capPerHour)) return rejected(UNAVAILABLE);
+
+    // The one patient with these details. With name and birth date alone, two patients who share both are never told apart by a guess.
+    const patient = strict
+      ? await this.patients.findMatch(trx, details.dto as CreatePatientDto)
+      : await this.patients.findByNameAndBirth(trx, `${details.dto.firstName} ${details.dto.lastName}`, details.dto.dateOfBirth);
     if (patient) {
       await trx.updateTable('conversations').set({ verified_patient_id: patient.id }).where('id', '=', runtime.conversationId).execute();
       await writeAuditLog(trx, {
@@ -386,6 +414,23 @@ export class SchedulingTools {
     }
 
     // Never says which detail was wrong.
+    const locked = await this.recordFailure(trx, runtime);
+    return {
+      status: 'ok',
+      result: locked
+        ? LOCKED
+        : { matched: false, error: 'No match. Do not say which detail was wrong. Ask the caller to repeat their details once more, or offer to take a message.' },
+    };
+  }
+
+  /** Whether this conversation has used up its failed identity checks. Locks the conversation row so two checks at once are counted one after the other. */
+  private async isLocked(trx: Trx, runtime: ToolRuntime): Promise<boolean> {
+    const row = await trx.selectFrom('conversations').select('identity_failures').where('id', '=', runtime.conversationId).forUpdate().executeTakeFirstOrThrow();
+    return row.identity_failures >= MAX_IDENTITY_FAILURES;
+  }
+
+  /** Counts a failed identity check in this conversation; true when that was the last one allowed (the database refuses a fourth). */
+  private async recordFailure(trx: Trx, runtime: ToolRuntime): Promise<boolean> {
     const after = await trx
       .updateTable('conversations')
       .set({ identity_failures: sql<number>`identity_failures + 1` })
@@ -406,12 +451,24 @@ export class SchedulingTools {
         metadata: { failures: after.identity_failures },
       });
     }
-    return {
-      status: 'ok',
-      result: locked
-        ? { matched: false, locked: true, error: 'The caller could not be identified. Do not try again. Offer to take a message for the team with create_staff_task.' }
-        : { matched: false, error: 'No match. Do not say which detail was wrong. Ask the caller to repeat their details once more, or offer to take a message.' },
-    };
+    return locked;
+  }
+
+  /**
+   * Whether too many identity checks failed in the last hour across the whole practice. Booking a stranger counts too (its
+   * refusals are stored with `matched: false`), because it can be used to find out who is a patient just as verify_patient can.
+   */
+  private async capReached(trx: Trx, runtime: ToolRuntime, capPerHour: number): Promise<boolean> {
+    const recent = await trx
+      .selectFrom('tool_invocations')
+      .select((eb) => eb.fn.countAll<string>().as('failures'))
+      .where('tool_name', 'in', ['verify_patient', 'book_appointment'])
+      .where('created_at', '>', sql<Date>`now() - interval '1 hour'`)
+      .where(sql<boolean>`result ->> 'matched' = 'false'`)
+      .executeTakeFirstOrThrow();
+    if (Number(recent.failures) < capPerHour) return false;
+    await this.noteCapReached(trx, runtime, capPerHour);
+    return true;
   }
 
   /** One audit event per hour when the practice-wide cap is first hit. */
@@ -440,14 +497,15 @@ export class SchedulingTools {
   private async requireVerified(trx: Trx, runtime: ToolRuntime): Promise<{ patientId: string } | ToolResult> {
     const row = await trx.selectFrom('conversations').select('verified_patient_id').where('id', '=', runtime.conversationId).executeTakeFirstOrThrow();
     if (row.verified_patient_id === null) {
-      return rejected({ error: 'The caller has not been identified. Ask for their first name, last name, date of birth and phone number, then use verify_patient.' });
+      const asked = runtime.context.scheduling.identityCheck === 'name_dob_phone' ? 'first name, last name, date of birth and phone number' : 'first name, last name and date of birth';
+      return rejected({ error: `The caller has not been identified. Ask for their ${asked}, then use verify_patient.` });
     }
     return { patientId: row.verified_patient_id };
   }
 
   // ------------------------------------------------------------------ booking
 
-  private async book(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat): Promise<ToolResult> {
+  private async book(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat, identityCheck: IdentityCheck, capPerHour: number): Promise<ToolResult> {
     const code = argText(args, 'slotCode');
     const offered = await this.issued<IssuedSlot>(trx, runtime.conversationId, SLOT_SOURCES, 'slots');
     const slot = code === undefined ? undefined : offered.find((candidate) => candidate.code.toLowerCase() === code.toLowerCase());
@@ -459,22 +517,17 @@ export class SchedulingTools {
       }
       return rejected({ error: `That is not one of the times offered. Use one of these codes: ${offered.map((candidate) => `${candidate.code} = ${candidate.label}`).join('; ')}.` });
     }
-    const details = this.details(args);
-    if ('problems' in details) {
-      return rejected({ error: 'Those details are not complete or not valid. Ask the caller again for the missing ones.', problems: details.problems });
-    }
-    // Never store a phone number the caller did not say (a patient record with a wrong number cannot be called back).
-    const misheard = await this.phoneNotSaid(trx, runtime, details.dto.phone);
-    if (misheard) return misheard;
+    const who = await this.patientForBooking(trx, runtime, args, identityCheck, capPerHour);
+    if ('status' in who) return who;
 
     const outcome = await this.attempt(trx, async () => {
-      const { patient } = await this.patients.findOrCreateInTransaction(trx, runtime.practiceId, { kind: 'ai' }, details.dto, runtime.meta);
+      const patientId = 'patientId' in who ? who.patientId : (await this.patients.findOrCreateInTransaction(trx, runtime.practiceId, { kind: 'ai' }, who.dto, runtime.meta)).patient.id;
       return this.appointments.bookInTransaction(
         trx,
         runtime.practiceId,
         { kind: 'ai' },
         {
-          patientId: patient.id,
+          patientId,
           providerId: slot.providerId,
           appointmentTypeId: slot.appointmentTypeId,
           startsAt: new Date(slot.startsAt),
@@ -489,6 +542,77 @@ export class SchedulingTools {
 
     this.say(runtime, bookedSentence(await this.factsOf(trx, outcome.value.appointmentId), runtime.context.practice.timezone, format));
     return { status: 'ok', result: { booked: true, note: 'The system will tell the caller. Do not say anything about the booking yourself.' } };
+  }
+
+  /**
+   * Who the appointment is for. With the stricter check the caller gives all four details, as before. With name and
+   * birth date, a patient who matches both is simply that patient (no number needed). Someone new is added, which
+   * needs a number to call them on: the one they chose to say, else the number they are calling from, else the model
+   * is told to ask. A date of birth about to be written on a new record must be one the caller said; the number never
+   * goes into a tool result.
+   */
+  private async patientForBooking(
+    trx: Trx,
+    runtime: ToolRuntime,
+    args: Record<string, unknown>,
+    identityCheck: IdentityCheck,
+    capPerHour: number,
+  ): Promise<{ patientId: string } | { dto: CreatePatientDto } | ToolResult> {
+    const incomplete = (problems: string[]) => rejected({ error: 'Those details are not complete or not valid. Ask the caller again for the missing ones.', problems });
+    if (identityCheck === 'name_dob_phone') {
+      const details = this.details(args);
+      if ('problems' in details) return incomplete(details.problems);
+      // Never store a phone number the caller did not say (a patient record with a wrong number cannot be called back).
+      return (await this.phoneNotSaid(trx, runtime, details.dto.phone)) ?? { dto: details.dto };
+    }
+
+    const identity = this.identity(args);
+    if ('problems' in identity) return incomplete(identity.problems);
+    const { firstName, lastName, dateOfBirth } = identity.dto;
+
+    // A known patient books at once and a stranger is asked for more, so booking could be used to find out who is a patient.
+    // It is limited like identification: refused for everyone once the conversation is locked or the practice's cap is reached,
+    // and a stranger counts as a failed check below.
+    if (await this.isLocked(trx, runtime)) return rejected(LOCKED);
+    if (await this.capReached(trx, runtime, capPerHour)) return rejected(UNAVAILABLE);
+    const existing = await this.patients.findByNameAndBirth(trx, `${firstName} ${lastName}`, dateOfBirth);
+    if (existing) return { patientId: existing.id };
+
+    // Not on file. Counted once per name and birth date in a conversation, so retrying after a misheard number costs nothing.
+    const key = identityKey(firstName, lastName, dateOfBirth);
+    const counted = await trx
+      .selectFrom('tool_invocations')
+      .select('id')
+      .where('conversation_id', '=', runtime.conversationId)
+      .where('tool_name', '=', 'book_appointment')
+      .where(sql<boolean>`result ->> 'identityKey' = ${key}`)
+      .limit(1)
+      .executeTakeFirst();
+    if (!counted) await this.recordFailure(trx, runtime);
+    // What is stored with these refusals (not shown to the model) is what the practice-wide cap and the line above count.
+    const missing = (error: string): ToolResult => ({ status: 'rejected', result: { error }, stored: { error, matched: false, identityKey: key } });
+
+    if (!(await callerSaidDate(trx, runtime.conversationId, dateOfBirth))) return missing(dateNotSaidMessage(dateOfBirth));
+    const said = argText(args, 'phone');
+    let phone: string | null = said ? normalizePhone(said) : null;
+    if (phone !== null) {
+      if (!(await callerSaidPhone(trx, runtime.conversationId, phone))) return missing(phoneNotSaidMessage(phone));
+    } else {
+      const call = await trx.selectFrom('conversations').select('caller_number').where('id', '=', runtime.conversationId).executeTakeFirstOrThrow();
+      // The number they are calling from; failing that, one they already said in full (not asked for again).
+      phone = call.caller_number ?? (await callerVolunteeredPhone(trx, runtime.conversationId));
+    }
+    if (phone === null) {
+      return missing(
+        'There is no number to call this caller on: the call has no caller ID and no patient on file matches. Ask the caller for a phone number, then try again with phone, written as a plus sign, the country code, then the number.',
+      );
+    }
+    const dto = plainToInstance(CreatePatientDto, { firstName, lastName, dateOfBirth, phone });
+    const problems = validateSync(dto, { whitelist: true, forbidUnknownValues: true });
+    if (problems.length > 0) {
+      return rejected({ error: 'That phone number is not valid.', problems: problems.flatMap((problem) => Object.values(problem.constraints ?? {})), note: PHONE_FORMAT_NOTE });
+    }
+    return { dto };
   }
 
   // ------------------------------------------------- seeing and changing own
@@ -610,6 +734,17 @@ export class SchedulingTools {
   /** A refusal when the phone number the model passed is not one the caller said anywhere in this conversation; null when it was said. */
   private async phoneNotSaid(trx: Trx, runtime: ToolRuntime, phone: string): Promise<ToolResult | null> {
     return (await callerSaidPhone(trx, runtime.conversationId, phone)) ? null : rejected({ error: phoneNotSaidMessage(phone) });
+  }
+
+  /** Name and date of birth only, as the model passed them. */
+  private identity(args: Record<string, unknown>): { dto: PatientIdentityDto } | { problems: string[] } {
+    const dto = plainToInstance(PatientIdentityDto, {
+      firstName: argText(args, 'firstName'),
+      lastName: argText(args, 'lastName'),
+      dateOfBirth: argText(args, 'dateOfBirth'),
+    });
+    const problems = validateSync(dto, { whitelist: true, forbidUnknownValues: true });
+    return problems.length > 0 ? { problems: problems.flatMap((problem) => Object.values(problem.constraints ?? {})) } : { dto };
   }
 
   private details(args: Record<string, unknown>): { dto: CreatePatientDto } | { problems: string[] } {

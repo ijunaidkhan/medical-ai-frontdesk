@@ -2,7 +2,6 @@ import {
   APPOINTMENT_CANCEL_REASON_MAX_LENGTH,
   APPOINTMENT_LIST_LIMIT_MAX,
   APPOINTMENT_STATUSES,
-  isValidBirthDate,
   PATIENT_NAME_MAX_LENGTH,
   PATIENT_SEARCH_LIMIT_MAX,
   PATIENT_SEARCH_MIN_LENGTH,
@@ -26,23 +25,13 @@ import {
   Min,
   MinLength,
   Validate,
-  ValidatorConstraint,
-  type ValidatorConstraintInterface,
 } from 'class-validator';
+import { BirthDateConstraint } from '../common/birth-date.constraint.js';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
-@ValidatorConstraint({ name: 'birthDate', async: false })
-class BirthDateConstraint implements ValidatorConstraintInterface {
-  validate(value: unknown): boolean {
-    return typeof value === 'string' && isValidBirthDate(value);
-  }
-  defaultMessage(): string {
-    return 'dateOfBirth must be a real date in the form YYYY-MM-DD, not in the future';
-  }
-}
-
-export class CreatePatientDto implements CreatePatientRequest {
+/** Who someone is: name and date of birth. The AI receptionist can identify a caller with just this. */
+export class PatientIdentityDto {
   @Transform(trim)
   @IsString()
   @MinLength(1)
@@ -57,7 +46,9 @@ export class CreatePatientDto implements CreatePatientRequest {
 
   @Validate(BirthDateConstraint)
   dateOfBirth!: string;
+}
 
+export class CreatePatientDto extends PatientIdentityDto implements CreatePatientRequest {
   @Matches(PHONE_PATTERN, { message: 'phone must be in international format: a plus sign, the country code, then the number, with no spaces' })
   phone!: string;
 }

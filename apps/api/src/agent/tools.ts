@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { describeBusinessHours, isOpenAt, type AiConfiguration, type TransferTarget } from '@frontdesk/shared';
+import { describeBusinessHours, isOpenAt, isValidBirthDate, type AiConfiguration, type IdentityCheck, type MessageContact, type TransferTarget } from '@frontdesk/shared';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import type { Transaction } from 'kysely';
+import { sql, type Transaction } from 'kysely';
 import type { RequestMeta } from '../common/request-meta.js';
 import type { Database } from '../database/database.types.js';
 import { KnowledgeRetriever } from '../knowledge/retriever.js';
+import { PatientsService } from '../scheduling/patients.service.js';
 import { CreateTaskDto } from '../tasks/tasks.dto.js';
 import { TasksService } from '../tasks/tasks.service.js';
 import type { ModelToolDefinition } from './model/language-model.js';
@@ -14,7 +15,8 @@ import { stripControl } from './sanitize.js';
 import { callerIsFinished } from './farewell.js';
 import { chooseTransferTarget } from './safety/escalation.js';
 import { SchedulingTools } from './scheduling-tools.js';
-import { callerSaidPhone, phoneNotSaidMessage } from './spoken-phone.js';
+import { callerSaidDate, dateNotSaidMessage } from './spoken-date.js';
+import { callerSaidPhone, callerVolunteeredPhone, normalizePhone, PHONE_FORMAT_NOTE, phoneNotSaidMessage } from './spoken-phone.js';
 
 /** A conversation may create at most this many tasks through the receptionist's tool (escalation tasks are separate). */
 export const MAX_TASKS_PER_CONVERSATION = 3;
@@ -27,10 +29,17 @@ export interface AgentContext {
   config: Pick<
     AiConfiguration,
     'greeting' | 'emergencyMessage' | 'crisisMessage' | 'urgentAction' | 'urgentTransferTargetId' | 'afterHoursAction' | 'afterHoursTransferTargetId' | 'businessHours'
-  > & { extraUrgentPhrases: string[] };
+  > & { extraUrgentPhrases: string[]; messageContact: MessageContact };
   targets: TransferTarget[];
   /** Whether the practice has switched on booking by the AI receptionist (read by the backend; the model is never told how it is set). */
-  scheduling: { enabled: boolean };
+  scheduling: { enabled: boolean; identityCheck: IdentityCheck };
+}
+
+/** The practice settings that decide which tools the model is offered and what they ask it for. */
+export interface ToolSettings {
+  schedulingEnabled: boolean;
+  messageContact: MessageContact;
+  identityCheck: IdentityCheck;
 }
 
 /** What tools change during one caller turn; applied to the conversation together with the reply. */
@@ -73,23 +82,6 @@ const TOOL_DEFINITIONS: Record<string, ModelToolDefinition> = {
     description: 'Get the practice name, phone number, opening hours, and whether it is open right now.',
     parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
-  create_staff_task: {
-    name: 'create_staff_task',
-    description:
-      'Pass a message or callback request to the practice staff. Ask the caller for their name and phone number first. Returns ok only if it was really saved.',
-    parameters: {
-      type: 'object',
-      properties: {
-        type: { type: 'string', enum: ['callback', 'message', 'question', 'other'] },
-        title: { type: 'string', description: 'A short summary for staff, for example "Wants an appointment".' },
-        details: { type: 'string', description: 'What the caller said they need, in the caller\'s own terms. No medical opinions.' },
-        contactName: { type: 'string' },
-        contactPhone: { type: 'string', description: 'The phone number the caller said, written as a plus sign, the country code, then the number, with no spaces.' },
-      },
-      required: ['type', 'title', 'contactPhone'],
-      additionalProperties: false,
-    },
-  },
   request_human_handoff: {
     name: 'request_human_handoff',
     description: 'Hand the conversation to a person because the caller asks for one.',
@@ -107,6 +99,38 @@ const TOOL_DEFINITIONS: Record<string, ModelToolDefinition> = {
   },
 };
 
+const PHONE_PROPERTY_ASKED = 'The phone number the caller said, written as a plus sign, the country code, then the number, with no spaces.';
+
+/** The message tool asks for what the practice chose: name and date of birth (the system finds the number), or name and phone number. */
+function createStaffTaskTool(messageContact: MessageContact): ModelToolDefinition {
+  const byBirthDate = messageContact === 'name_dob';
+  return {
+    name: 'create_staff_task',
+    // With name and birth date this tool asks for the same details as identifying a caller, and a small model then takes it for
+    // cancelling or moving an appointment. Saying when it is for (without naming other tools, which draws attention to them) helps.
+    description:
+      (byBirthDate
+        ? 'Pass a message to the practice staff, only when the caller asks to leave a message or needs something you cannot do yourself with your other tools. Ask the caller for their first and last name and date of birth first. Do not ask for a phone number: the system finds the number to call back.'
+        : 'Pass a message or callback request to the practice staff. Ask the caller for their name and phone number first.') + ' Returns ok only if it was really saved.',
+    parameters: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['callback', 'message', 'question', 'other'] },
+        title: { type: 'string', description: 'A short summary for staff, for example "Wants an appointment".' },
+        details: { type: 'string', description: "What the caller said they need, in the caller's own terms. No medical opinions." },
+        contactName: byBirthDate ? { type: 'string', description: "The caller's first and last name." } : { type: 'string' },
+        ...(byBirthDate ? { contactDateOfBirth: { type: 'string', description: "The caller's date of birth, written YYYY-MM-DD." } } : {}),
+        contactPhone: {
+          type: 'string',
+          description: byBirthDate ? `Only when the system has asked for a phone number. ${PHONE_PROPERTY_ASKED}` : PHONE_PROPERTY_ASKED,
+        },
+      },
+      required: byBirthDate ? ['type', 'title', 'contactName', 'contactDateOfBirth'] : ['type', 'title', 'contactPhone'],
+      additionalProperties: false,
+    },
+  };
+}
+
 const TOOLS_BY_MODE: Record<AgentMode, readonly string[]> = {
   normal: ['search_knowledge', 'get_practice_info', 'create_staff_task', 'request_human_handoff', 'end_conversation'],
   // After an emergency or urgent reply the receptionist may only take a callback request.
@@ -119,6 +143,20 @@ const pickString = (args: Record<string, unknown>, key: string): string | undefi
   return text.trim() !== '' ? text : undefined;
 };
 
+/** Small models write "null" or "none" for a detail they do not have; that is not a detail. */
+const NOT_A_DETAIL = /^(null|none|n\/a|unknown|undefined)$/i;
+const pickContact = (args: Record<string, unknown>, key: string): string | undefined => {
+  const text = pickString(args, key);
+  return text !== undefined && !NOT_A_DETAIL.test(text.trim()) ? text : undefined;
+};
+
+/** Who to call back about a message, and (when it was asked for) their date of birth. `note` is what the model is told to say about the number. */
+interface Contact {
+  phone: string;
+  dateOfBirth?: string;
+  note?: string;
+}
+
 /**
  * The receptionist's tools. Each one validates what the model asked for and does
  * its narrow job inside the practice-scoped transaction it is given: the tenant
@@ -130,12 +168,14 @@ export class AgentTools {
     private readonly retriever: KnowledgeRetriever,
     private readonly tasks: TasksService,
     private readonly scheduling: SchedulingTools,
+    private readonly patients: PatientsService,
   ) {}
 
   /** The scheduling tools exist only in a normal conversation, and only while the practice has booking switched on. */
-  definitions(mode: AgentMode, schedulingEnabled: boolean): ModelToolDefinition[] {
-    const base = TOOLS_BY_MODE[mode].map((name) => TOOL_DEFINITIONS[name]!);
-    return mode === 'normal' && schedulingEnabled ? [...base, ...this.scheduling.definitions()] : base;
+  definitions(mode: AgentMode, { schedulingEnabled, messageContact, identityCheck }: ToolSettings): ModelToolDefinition[] {
+    const booking = mode === 'normal' && schedulingEnabled;
+    const base = TOOLS_BY_MODE[mode].map((name) => (name === 'create_staff_task' ? createStaffTaskTool(messageContact) : TOOL_DEFINITIONS[name]!));
+    return booking ? [...base, ...this.scheduling.definitions(identityCheck)] : base;
   }
 
   /** What the conversation has already settled about booking (identified or not, the codes issued), for the model's instructions. */
@@ -208,33 +248,105 @@ export class AgentTools {
       return { status: 'rejected', result: { error: 'The limit for messages in one conversation has been reached. Tell the caller the team already has their details.' } };
     }
     // A message nobody can answer is useless: the team needs a number to call back. Enforced here, whatever the model decides.
-    if (!pickString(args, 'contactPhone')) {
-      return {
-        status: 'rejected',
-        result: { error: 'A phone number is needed so the team can call the caller back. Ask the caller for their name and a phone number (with the country code) first, then try again.' },
-      };
-    }
-    // The number must be one the caller said: a made-up or mistyped number would send staff to call nobody.
-    const phone = pickString(args, 'contactPhone')!;
-    if (!(await callerSaidPhone(trx, runtime.conversationId, phone))) {
-      return { status: 'rejected', result: { error: phoneNotSaidMessage(phone) } };
-    }
+    const contact = await this.resolveContact(trx, runtime, args);
+    if ('status' in contact) return contact;
+
     // Only these fields are read; the priority is always normal (urgent tasks come from the safety layer, never from the model).
     const dto = plainToInstance(CreateTaskDto, {
       type: pickString(args, 'type'),
       title: pickString(args, 'title'),
       details: pickString(args, 'details'),
-      contactName: pickString(args, 'contactName'),
-      contactPhone: pickString(args, 'contactPhone'),
+      contactName: pickContact(args, 'contactName'),
+      contactPhone: contact.phone,
+      contactDateOfBirth: contact.dateOfBirth,
       priority: 'normal',
     });
     const problems = validateSync(dto, { whitelist: true, forbidUnknownValues: true });
     if (problems.length > 0) {
-      return { status: 'rejected', result: { error: 'Invalid task', problems: problems.flatMap((problem) => Object.values(problem.constraints ?? {})) } };
+      const phoneProblem = problems.some((problem) => problem.property === 'contactPhone');
+      return {
+        status: 'rejected',
+        result: {
+          error: 'Invalid task',
+          problems: problems.flatMap((problem) => Object.values(problem.constraints ?? {})),
+          ...(phoneProblem ? { note: PHONE_FORMAT_NOTE } : {}),
+        },
+      };
+    }
+    // A model that is told to "save it" again must not make a second task for the same message.
+    if (await this.alreadySaved(trx, runtime.conversationId, dto)) {
+      return { status: 'ok', result: { saved: true, alreadySaved: true, note: 'This message was already passed on. Do not save it again: tell the caller it has been passed on.' } };
     }
     const id = await this.tasks.createInTransaction(trx, runtime.practiceId, dto, { kind: 'ai' }, runtime.meta, runtime.conversationId);
     runtime.state.createdTaskIds.push(id);
-    return { status: 'ok', result: { saved: true, taskId: id } };
+    return { status: 'ok', result: { saved: true, taskId: id, ...(contact.note ? { note: contact.note } : {}) } };
+  }
+
+  /**
+   * Who to call back, and how they are known. With "name and date of birth" the caller is not asked for a number: it
+   * is the one they gave if they chose to, else the number they are calling from, else the number on the patient
+   * record with this name and birth date. Only when none exists is the model told to ask for one. With "name and
+   * phone number" the caller's number is always needed. A number the caller said is checked against what they said,
+   * so a made-up or misheard number never sends staff to call nobody. The number itself is never put in a tool result.
+   */
+  private async resolveContact(trx: Transaction<Database>, runtime: ToolRuntime, args: Record<string, unknown>): Promise<Contact | ToolResult> {
+    const refuse = (error: string): ToolResult => ({ status: 'rejected', result: { error } });
+    const said = pickContact(args, 'contactPhone');
+    const saidPhone = async (): Promise<Contact | ToolResult> => {
+      const phone = normalizePhone(said!); // spaces and dashes are how numbers are said and written, not a mistake
+      return (await callerSaidPhone(trx, runtime.conversationId, phone)) ? { phone } : refuse(phoneNotSaidMessage(phone));
+    };
+
+    if (runtime.context.config.messageContact === 'name_phone') {
+      return said ? saidPhone() : refuse('A phone number is needed so the team can call the caller back. Ask the caller for their name and a phone number (with the country code) first, then try again.');
+    }
+
+    const name = pickContact(args, 'contactName');
+    const dateOfBirth = pickContact(args, 'contactDateOfBirth');
+    if (!name || !dateOfBirth) {
+      return refuse("To pass on a message you need the caller's first and last name and date of birth. Ask the caller for what is missing, then try again.");
+    }
+    if (!isValidBirthDate(dateOfBirth)) {
+      return refuse('That date of birth is not a real date. Ask the caller to say it again, and give it to the tool as YYYY-MM-DD.');
+    }
+    if (!(await callerSaidDate(trx, runtime.conversationId, dateOfBirth))) {
+      return refuse(dateNotSaidMessage(dateOfBirth));
+    }
+
+    if (said) {
+      const given = await saidPhone();
+      return 'status' in given ? given : { ...given, dateOfBirth };
+    }
+    const call = await trx.selectFrom('conversations').select('caller_number').where('id', '=', runtime.conversationId).executeTakeFirstOrThrow();
+    if (call.caller_number) {
+      return { phone: call.caller_number, dateOfBirth, note: 'Tell the caller the team will call them back on the number they are calling from. Do not say the number.' };
+    }
+    const patient = await this.patients.findByNameAndBirth(trx, name, dateOfBirth);
+    if (patient) {
+      return { phone: patient.phone, dateOfBirth, note: 'Tell the caller the team will call them back on the number the practice has on file for them. Do not say the number.' };
+    }
+    // Last resort before asking: a number the caller already said in full is not asked for again.
+    const volunteered = await callerVolunteeredPhone(trx, runtime.conversationId);
+    if (volunteered) {
+      return { phone: volunteered, dateOfBirth, note: 'Tell the caller the team will call them back on the number they gave. Do not say the number.' };
+    }
+    return refuse(
+      'There is no number to call this caller back on: the call has no caller ID and no patient on file matches that name and date of birth. Ask the caller for a phone number to call back, then try again with contactPhone, written as a plus sign, the country code, then the number.',
+    );
+  }
+
+  /** Whether this conversation already saved this very message: same kind, same title and same callback number. */
+  private async alreadySaved(trx: Transaction<Database>, conversationId: string, dto: CreateTaskDto): Promise<boolean> {
+    const row = await trx
+      .selectFrom('staff_tasks')
+      .select('id')
+      .where('conversation_id', '=', conversationId)
+      .where('type', '=', dto.type)
+      .where('contact_phone', '=', dto.contactPhone ?? '')
+      .where(sql<boolean>`lower(btrim(title)) = lower(${dto.title})`)
+      .limit(1)
+      .executeTakeFirst();
+    return row !== undefined;
   }
 
   private handoff(runtime: ToolRuntime): ToolResult {
@@ -251,7 +363,9 @@ export class AgentTools {
       status: 'ok',
       result: {
         handedOff: false,
-        note: 'No one is available to take the call. Say so, then offer to take a message: ask for their name, a phone number and what it is about, and use create_staff_task.',
+        note: `No one is available to take the call. Say so, then offer to take a message: ask for their ${
+          context.config.messageContact === 'name_dob' ? 'first and last name, date of birth' : 'name, a phone number'
+        } and what it is about, and use create_staff_task.`,
       },
     };
   }

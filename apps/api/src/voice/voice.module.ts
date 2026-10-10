@@ -7,11 +7,12 @@ import { RelayGateway } from './relay.gateway.js';
 import { TwilioSignatureGuard } from './twilio-signature.guard.js';
 import { VoiceController } from './voice.controller.js';
 import { VoiceService } from './voice.service.js';
+import { WebCallsController } from './web-calls.controller.js';
 
 /** Phone calls: which practice a call is for, whether the AI answers, and the live voice session. */
 @Module({
   imports: [AiModule, AgentModule],
-  controllers: [PhoneNumbersController, VoiceController],
+  controllers: [PhoneNumbersController, VoiceController, WebCallsController],
   providers: [PhoneNumbersService, TwilioSignatureGuard, VoiceService, RelayGateway],
   exports: [PhoneNumbersService, TwilioSignatureGuard],
 })

@@ -1,0 +1,89 @@
+<h1>Web phone</h1>
+<p class="muted intro">
+  Try the AI receptionist for {{ auth.practice()?.name }} by voice, as a caller would. This is the real receptionist, with the same rules, safety checks and voice
+  instructions as a phone call.
+</p>
+<p class="alert" role="note">
+  <strong>This is a test, but what the AI does is real.</strong> If it saves a message, books an appointment, or an emergency phrase raises an alert, that really
+  happens in your practice. Chrome and Edge send your voice to Google or Microsoft to turn it into text, so use made-up details only.
+</p>
+
+@if (problems().length > 0) {
+  <div class="alert alert-error" role="alert">
+    @if (problems().length > 1) {
+      <p>The web phone cannot be used yet:</p>
+      <ul class="problems">
+        @for (problem of problems(); track problem) {
+          <li>{{ problem }}</li>
+        }
+      </ul>
+    } @else {
+      <p>{{ problems()[0] }}</p>
+    }
+    @if (setupProblem()) {
+      <p><a routerLink="/ai">Open the AI receptionist settings</a> to finish setting it up.</p>
+    }
+  </div>
+}
+
+@if (phase() === 'idle') {
+  <section class="card" aria-labelledby="start-title">
+    <h2 id="start-title">Start a call</h2>
+    @if (supported) {
+      <p class="muted">The receptionist answers with your greeting. Then speak, and wait for the reply: the microphone is off while the receptionist is talking.</p>
+      <button type="button" class="btn btn-primary" (click)="start()">Start a call</button>
+    } @else {
+      <p>This browser cannot listen and speak for the web phone. Use Chrome or Edge.</p>
+    }
+  </section>
+} @else {
+  <section class="card call" aria-labelledby="call-title">
+    <div class="call-head">
+      <h2 id="call-title">{{ onCall() ? 'On a call' : 'Call ended' }}</h2>
+      @if (onCall()) {
+        <span class="clock" aria-label="Call length">{{ clock() }}</span>
+      }
+    </div>
+
+    @if (phase() === 'connecting') {
+      <p class="muted" role="status">Connecting…</p>
+    } @else if (onCall()) {
+      <p class="moment" role="status" [class.listening]="moment() === 'listening'">{{ momentText() }}</p>
+      <div class="controls">
+        <button type="button" class="btn" [disabled]="moment() !== 'speaking'" (click)="interrupt()">Interrupt</button>
+        <button type="button" class="btn btn-danger" (click)="hangUp()">Hang up</button>
+      </div>
+    }
+
+    <ol class="log" aria-label="The call so far" aria-live="polite">
+      @for (line of lines(); track $index) {
+        <li class="line" [class.caller]="line.who === 'caller'" [class.ai]="line.who === 'ai'">
+          <span class="who">{{ line.who === 'caller' ? 'You (as the caller)' : 'AI receptionist' }}</span>
+          <span class="said">{{ line.text }}</span>
+          @if (line.note; as note) {
+            <span class="note muted">{{ note }}</span>
+          }
+        </li>
+      }
+      @if (hearing() !== '') {
+        <li class="line caller hearing">
+          <span class="who">You (as the caller)</span>
+          <span class="said">{{ hearing() }}</span>
+        </li>
+      }
+    </ol>
+
+    @if (phase() === 'ended') {
+      <p class="alert" role="status">{{ endedText() }}</p>
+      <p>
+        @if (conversationId(); as id) {
+          @if (lines().length > 0) {
+            <a [routerLink]="['/conversations', id]">Open this call in Conversations</a>
+            ·
+          }
+        }
+        <button type="button" class="btn btn-primary" (click)="start()">Start another call</button>
+      </p>
+    }
+  </section>
+}

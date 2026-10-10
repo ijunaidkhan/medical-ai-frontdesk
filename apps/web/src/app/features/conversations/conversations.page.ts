@@ -7,7 +7,7 @@ import { errorMessage } from '../../core/api/api-error';
 import { ConversationsApi } from '../../core/api/conversations-api';
 import { AuthService } from '../../core/auth/auth.service';
 import { formatDateTime } from '../../core/format';
-import { CHANNEL_LABELS, OUTCOME_LABELS } from '../../core/labels';
+import { channelLabel, OUTCOME_LABELS } from '../../core/labels';
 
 const PAGE_SIZE = 25;
 
@@ -23,7 +23,7 @@ export class ConversationsPage {
   protected readonly auth = inject(AuthService);
   private readonly api = inject(ConversationsApi);
 
-  protected readonly channelLabels = CHANNEL_LABELS;
+  protected readonly channelLabel = channelLabel;
   protected readonly outcomeLabels = OUTCOME_LABELS;
 
   protected readonly items = signal<ConversationSummary[]>([]);

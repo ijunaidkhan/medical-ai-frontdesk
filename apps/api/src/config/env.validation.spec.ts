@@ -179,6 +179,16 @@ describe('validateEnv', () => {
       expect(() => validateEnv({ ...REQUIRED, VOICE_PROVIDER: 'vonage' })).toThrow(/VOICE_PROVIDER/);
     });
 
+    it('accepts the web phone ("dev") in development and test with no Twilio settings', () => {
+      expect(validateEnv({ ...REQUIRED, VOICE_PROVIDER: 'dev' }).VOICE_PROVIDER).toBe('dev');
+      expect(validateEnv({ ...REQUIRED, VOICE_PROVIDER: 'dev', NODE_ENV: 'test' }).VOICE_PROVIDER).toBe('dev');
+    });
+
+    it('refuses the web phone ("dev") in production', () => {
+      expect(() => validateEnv({ ...REQUIRED, VOICE_PROVIDER: 'dev', NODE_ENV: 'production' })).toThrow(/VOICE_PROVIDER.*development only/);
+      expect(validateEnv({ ...REQUIRED, ...VOICE, NODE_ENV: 'production' }).VOICE_PROVIDER).toBe('twilio');
+    });
+
     it('never echoes the token in an error message', () => {
       try {
         validateEnv({ ...REQUIRED, ...VOICE, PUBLIC_BASE_URL: 'not a url' });

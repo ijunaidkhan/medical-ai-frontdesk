@@ -5,7 +5,7 @@
 } @else if (loading()) {
   <p class="muted" role="status">Loading…</p>
 } @else if (conversation(); as c) {
-  <h1>{{ channelLabels[c.channel] }}, {{ when(c.startedAt) }}</h1>
+  <h1>{{ channelLabel(c) }}, {{ when(c.startedAt) }}</h1>
   <p class="muted summary">
     @if (c.startedByName) {
       Run by {{ c.startedByName }} ·

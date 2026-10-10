@@ -12,7 +12,9 @@ import type {
   TurnSource,
   TurnSpeaker,
   KnowledgeCategory,
+  IdentityCheck,
   KnowledgeStatus,
+  MessageContact,
   Role,
   TaskPriority,
   TimeFormat,
@@ -125,6 +127,8 @@ export interface StaffTasksTable {
   details: string | null;
   contact_name: string | null;
   contact_phone: string | null;
+  /** Written as YYYY-MM-DD; read it as text (`contact_date_of_birth::text`), the driver would make a Date in the server's time zone. */
+  contact_date_of_birth: Generated<string | null>;
   created_by_type: 'user' | 'ai';
   created_by: string | null;
   assigned_to: string | null;
@@ -159,6 +163,7 @@ export interface AiSettingsTable {
   urgent_action: UrgentAction;
   urgent_transfer_target_id: string | null;
   extra_urgent_phrases: string[];
+  message_contact: Generated<MessageContact>;
   business_hours: BusinessHours;
   updated_by: string | null;
   created_at: Generated<Date>;
@@ -211,6 +216,7 @@ export interface SchedulingSettingsTable {
   ai_booking_enabled: Generated<boolean>;
   time_format: Generated<TimeFormat>;
   identity_failure_cap_per_hour: Generated<number>;
+  identity_check: Generated<IdentityCheck>;
   updated_by: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;

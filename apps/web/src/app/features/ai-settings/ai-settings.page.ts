@@ -7,6 +7,7 @@ import {
   EMERGENCY_MESSAGE_MAX_LENGTH,
   GREETING_MAX_LENGTH,
   MAX_INTERVALS_PER_DAY,
+  MESSAGE_CONTACTS,
   TRANSFER_PURPOSES,
   URGENT_ACTIONS,
   URGENT_PHRASES_MAX_COUNT,
@@ -15,6 +16,7 @@ import {
   type AfterHoursAction,
   type AiSettings,
   type BusinessHours,
+  type MessageContact,
   type TransferPurpose,
   type TransferTarget,
   type UpdateAiSettingsRequest,
@@ -25,7 +27,7 @@ import { firstValueFrom } from 'rxjs';
 import { AiApi } from '../../core/api/ai-api';
 import { errorMessage, errorMessages } from '../../core/api/api-error';
 import { AuthService } from '../../core/auth/auth.service';
-import { AFTER_HOURS_LABELS, TRANSFER_PURPOSE_LABELS, URGENT_ACTION_LABELS, WEEKDAY_LABELS } from '../../core/labels';
+import { AFTER_HOURS_LABELS, MESSAGE_CONTACT_LABELS, TRANSFER_PURPOSE_LABELS, URGENT_ACTION_LABELS, WEEKDAY_LABELS } from '../../core/labels';
 
 /** What the form edits. Phrases are one per line in the box. */
 interface Draft {
@@ -37,6 +39,7 @@ interface Draft {
   urgentAction: UrgentAction;
   urgentTransferTargetId: string;
   extraUrgentPhrases: string;
+  messageContact: MessageContact;
   businessHours: BusinessHours;
 }
 
@@ -49,6 +52,7 @@ const toDraft = (settings: AiSettings): Draft => ({
   urgentAction: settings.urgentAction,
   urgentTransferTargetId: settings.urgentTransferTargetId ?? '',
   extraUrgentPhrases: settings.extraUrgentPhrases.join('\n'),
+  messageContact: settings.messageContact,
   businessHours: structuredClone(settings.businessHours),
 });
 
@@ -75,6 +79,8 @@ export class AiSettingsPage {
   protected readonly afterHoursLabels = AFTER_HOURS_LABELS;
   protected readonly urgentActions = URGENT_ACTIONS;
   protected readonly urgentLabels = URGENT_ACTION_LABELS;
+  protected readonly messageContacts = MESSAGE_CONTACTS;
+  protected readonly messageContactLabels = MESSAGE_CONTACT_LABELS;
   protected readonly purposes = TRANSFER_PURPOSES;
   protected readonly purposeLabels = TRANSFER_PURPOSE_LABELS;
   protected readonly disclosure = AI_DISCLOSURE;
@@ -120,6 +126,7 @@ export class AiSettingsPage {
     if (draft.urgentAction !== saved.urgentAction) changes.urgentAction = draft.urgentAction;
     if (draft.urgentTransferTargetId !== saved.urgentTransferTargetId) changes.urgentTransferTargetId = draft.urgentTransferTargetId || null;
     if (JSON.stringify(phrasesOf(draft.extraUrgentPhrases)) !== JSON.stringify(settings.extraUrgentPhrases)) changes.extraUrgentPhrases = phrasesOf(draft.extraUrgentPhrases);
+    if (draft.messageContact !== saved.messageContact) changes.messageContact = draft.messageContact;
     if (JSON.stringify(draft.businessHours) !== JSON.stringify(saved.businessHours)) changes.businessHours = draft.businessHours;
     return changes;
   });
@@ -155,6 +162,11 @@ export class AiSettingsPage {
   protected chooseUrgentAction(event: Event): void {
     const chosen = URGENT_ACTIONS.find((action) => action === this.value(event));
     if (chosen) this.set('urgentAction', chosen);
+  }
+
+  protected chooseMessageContact(event: Event): void {
+    const chosen = MESSAGE_CONTACTS.find((contact) => contact === this.value(event));
+    if (chosen) this.set('messageContact', chosen);
   }
 
   protected set<K extends keyof Draft>(field: K, value: Draft[K]): void {

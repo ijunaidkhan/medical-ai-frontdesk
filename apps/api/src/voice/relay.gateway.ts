@@ -6,13 +6,14 @@ import { HttpAdapterHost } from '@nestjs/core';
 import { PinoLogger } from 'nestjs-pino';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import type { EnvironmentVariables } from '../config/env.validation.js';
+import { RELAY_PATH } from './relay-address.js';
 import { RelaySession } from './relay-session.js';
 import { RelaySessions } from './relay-sessions.js';
 import { RelayTokenService } from './relay-token.js';
 import { isValidTwilioSignature } from './twilio-signature.js';
 import { VoiceService } from './voice.service.js';
+import { isWebCallSid } from './web-call.js';
 
-export const RELAY_PATH = '/api/voice/relay';
 /** No message from Twilio is anywhere near this large; anything bigger is refused by the connection itself. */
 const MAX_MESSAGE_BYTES = 64 * 1024;
 
@@ -30,6 +31,10 @@ const STATUS_TEXT: Record<number, string> = { 400: 'Bad Request', 401: 'Unauthor
  *  5. that conversation has not opened a session before (one session per call).
  *
  * Tenant and conversation come from the token, which only this server can make.
+ *
+ * With VOICE_PROVIDER=dev (the web phone) a browser opens the session, and a browser cannot sign
+ * anything, so step 3 is replaced by: the call must be a web-phone call. Its token is made only by
+ * the login-protected web-call route. Every other check is the same.
  */
 @Injectable()
 export class RelayGateway implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -50,7 +55,7 @@ export class RelayGateway implements OnApplicationBootstrap, OnApplicationShutdo
   }
 
   onApplicationBootstrap(): void {
-    if (this.config.get('VOICE_PROVIDER', { infer: true }) !== 'twilio') {
+    if (this.config.get('VOICE_PROVIDER', { infer: true }) === 'none') {
       return; // voice is off: nothing listens, and a WebSocket request is just refused by the server
     }
     const server = this.adapterHost.httpAdapter.getHttpServer() as import('node:http').Server;
@@ -83,16 +88,9 @@ export class RelayGateway implements OnApplicationBootstrap, OnApplicationShutdo
       return this.refuse(socket, 401);
     }
 
-    // 3. Twilio's signature over the address it was told to open. Which scheme Twilio signs (wss or https) is
-    //    not stated in its documentation, so the same address written either way is accepted; nothing else is.
-    const header = request.headers['x-twilio-signature'];
-    const authToken = this.config.get('TWILIO_AUTH_TOKEN', { infer: true }) ?? '';
-    const base = this.config.get('PUBLIC_BASE_URL', { infer: true }) ?? '';
-    const asHttps = `${base}${request.url}`;
-    const asWss = asHttps.replace(/^http/, 'ws');
-    const signature = typeof header === 'string' ? header : undefined;
-    if (!isValidTwilioSignature(authToken, signature, asWss, {}) && !isValidTwilioSignature(authToken, signature, asHttps, {})) {
-      this.logger.warn({ practiceId: claims.practiceId, hasSignature: signature !== undefined }, 'A voice session was refused: missing or wrong Twilio signature');
+    // 3. Twilio's signature (not with the web phone: see above).
+    const webPhone = this.config.get('VOICE_PROVIDER', { infer: true }) === 'dev';
+    if (!webPhone && !this.hasTwilioSignature(request, claims.practiceId)) {
       return this.refuse(socket, 403);
     }
 
@@ -102,6 +100,10 @@ export class RelayGateway implements OnApplicationBootstrap, OnApplicationShutdo
       this.logger.warn({ practiceId: claims.practiceId }, 'A voice session was refused: the call is not live');
       return this.refuse(socket, 410);
     }
+    if (webPhone && !isWebCallSid(callSid)) {
+      this.logger.warn({ practiceId: claims.practiceId }, 'A voice session was refused: the web phone opens only web-phone calls');
+      return this.refuse(socket, 403);
+    }
 
     // 5. One session per call.
     if (!this.sessions.tryOpen(claims.conversationId)) {
@@ -110,6 +112,24 @@ export class RelayGateway implements OnApplicationBootstrap, OnApplicationShutdo
     }
 
     this.wss.handleUpgrade(request, socket, head, (ws) => this.attach(ws, claims.practiceId, claims.conversationId, callSid));
+  }
+
+  /**
+   * Twilio's signature over the address it was told to open. Which scheme Twilio signs (wss or https) is
+   * not stated in its documentation, so the same address written either way is accepted; nothing else is.
+   */
+  private hasTwilioSignature(request: IncomingMessage, practiceId: string): boolean {
+    const header = request.headers['x-twilio-signature'];
+    const authToken = this.config.get('TWILIO_AUTH_TOKEN', { infer: true }) ?? '';
+    const base = this.config.get('PUBLIC_BASE_URL', { infer: true }) ?? '';
+    const asHttps = `${base}${request.url}`;
+    const asWss = asHttps.replace(/^http/, 'ws');
+    const signature = typeof header === 'string' ? header : undefined;
+    if (isValidTwilioSignature(authToken, signature, asWss, {}) || isValidTwilioSignature(authToken, signature, asHttps, {})) {
+      return true;
+    }
+    this.logger.warn({ practiceId, hasSignature: signature !== undefined }, 'A voice session was refused: missing or wrong Twilio signature');
+    return false;
   }
 
   private attach(ws: WebSocket, practiceId: string, conversationId: string, callSid: string): void {

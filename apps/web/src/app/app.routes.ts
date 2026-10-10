@@ -44,6 +44,12 @@ export const routes: Routes = [
         loadComponent: () => import('./features/test-chat/test-chat.page').then((m) => m.TestChatPage),
       },
       {
+        path: 'web-phone',
+        title: 'Web phone · AI Front Desk',
+        canActivate: [permissionGuard('ai:configure')],
+        loadComponent: () => import('./features/web-phone/web-phone.page').then((m) => m.WebPhonePage),
+      },
+      {
         path: 'tasks',
         title: 'Tasks · AI Front Desk',
         canActivate: [permissionGuard('tasks:read')],

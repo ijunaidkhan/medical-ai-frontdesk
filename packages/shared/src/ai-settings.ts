@@ -17,6 +17,13 @@ export type AfterHoursAction = (typeof AFTER_HOURS_ACTIONS)[number];
 export const URGENT_ACTIONS = ['transfer', 'urgent_task', 'transfer_and_task'] as const;
 export type UrgentAction = (typeof URGENT_ACTIONS)[number];
 
+/**
+ * What the receptionist asks a caller for when taking a message: name and date of birth (the system finds the
+ * number to call back itself), or name and phone number.
+ */
+export const MESSAGE_CONTACTS = ['name_dob', 'name_phone'] as const;
+export type MessageContact = (typeof MESSAGE_CONTACTS)[number];
+
 export const TRANSFER_PURPOSES = ['front_desk', 'on_call', 'billing', 'other'] as const;
 export type TransferPurpose = (typeof TRANSFER_PURPOSES)[number];
 
@@ -229,6 +236,8 @@ export interface AiSettings {
   urgentTransferTargetId: string | null;
   /** Extra words or phrases that mark a call as urgent for this practice (added to the built-in list, never replacing it). */
   extraUrgentPhrases: string[];
+  /** What the receptionist asks for when taking a message for staff. */
+  messageContact: MessageContact;
   businessHours: BusinessHours;
   updatedAt: string | null;
   /** True when nothing stops the AI from being turned on. */
@@ -248,6 +257,7 @@ export interface UpdateAiSettingsRequest {
   urgentAction?: UrgentAction;
   urgentTransferTargetId?: string | null;
   extraUrgentPhrases?: string[];
+  messageContact?: MessageContact;
   businessHours?: BusinessHours;
 }
 
@@ -263,16 +273,9 @@ export type AiConfiguration = Pick<
   | 'businessHours'
 >;
 
-/**
- * Everything that must be true before the receptionist may answer calls.
- * The ones that matter most for safety, a greeting, an emergency message and a
- * crisis message, are also enforced by the database, so no bug can switch the
- * AI on without them.
- */
-export function aiReadinessProblems(config: AiConfiguration, targets: ReadonlyArray<Pick<TransferTarget, 'id' | 'active'>>): string[] {
+/** What must be written before anyone can try the receptionist, in a test chat or on the web phone (the AI need not be switched on). */
+export function chatStartProblems(config: Pick<AiConfiguration, 'greeting' | 'emergencyMessage' | 'crisisMessage'>): string[] {
   const problems: string[] = [];
-  const activeTarget = (id: string | null) => id !== null && targets.some((target) => target.id === id && target.active);
-
   if (config.greeting.trim().length === 0) {
     problems.push('Write a greeting');
   }
@@ -282,6 +285,19 @@ export function aiReadinessProblems(config: AiConfiguration, targets: ReadonlyAr
   if (config.crisisMessage.trim().length < CRISIS_MESSAGE_MIN_LENGTH) {
     problems.push('Write the crisis message callers will hear if they mention suicide or self-harm (for example, the 988 line in the US)');
   }
+  return problems;
+}
+
+/**
+ * Everything that must be true before the receptionist may answer calls.
+ * The ones that matter most for safety, a greeting, an emergency message and a
+ * crisis message, are also enforced by the database, so no bug can switch the
+ * AI on without them.
+ */
+export function aiReadinessProblems(config: AiConfiguration, targets: ReadonlyArray<Pick<TransferTarget, 'id' | 'active'>>): string[] {
+  const problems = chatStartProblems(config);
+  const activeTarget = (id: string | null) => id !== null && targets.some((target) => target.id === id && target.active);
+
   if (!hasAnyOpeningHours(config.businessHours)) {
     problems.push('Set your business hours');
   }
