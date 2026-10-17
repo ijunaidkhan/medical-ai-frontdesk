@@ -1,6 +1,6 @@
 # AI receptionist (milestone 2)
 
-Status: **approved 2026-09-30, in progress.** M2a is being built in small steps; M2b (telephony and voice) has not started. This records the approved design and the decisions taken while building it.
+Status: **approved 2026-09-30, in progress.** M2a is built; M2b (telephony and voice) is partly built (see [telephony-voice.md](telephony-voice.md)). This records the approved design and the decisions taken while building it. The whole plan is in [../roadmap.md](../roadmap.md).
 
 ## Progress
 
@@ -62,16 +62,16 @@ Nothing here can be reached without a language model being configured, except th
 Test chat (`POST /api/agent/test-conversations` and `.../:id/messages`) needs `ai:configure` and works before the AI is switched on, but only when the practice has a greeting and an emergency message (409 lists what is missing). Transcripts and tool calls are read with `calls:read`, and every view of a transcript is audited (`conversation.viewed`). Escalations are audited as `conversation.escalated` by the "system" actor, with the level and what happened, never the caller's words.
 
 **Known limits:** a test chat is one stream per conversation, so two messages sent at the same instant are ordered by the database but may interleave.
-**Phone calls (M2b)** are proposed in [telephony-voice.md](telephony-voice.md) and wait for approval.
+**Phone calls (M2b)** are designed in [telephony-voice.md](telephony-voice.md) (approved 2026-09-30; steps 1 to 3 and a browser "web phone" for development are built).
 
 ## Order of work
 
 | Milestone | Scope |
 |---|---|
 | **M2a** | Knowledge base, agent (text channel), tools, safety and escalation, staff tasks, call review, a text "test chat" in the web app |
-| **M2b** | Phone number, real calls, speech in and out, transfers |
-| **M3** | Appointments (book, cancel, reschedule): steps 1 to 3 built (staff API and the AI receptionist's booking tools), web screens and real-model testing next; see [scheduling.md](scheduling.md). SMS confirmations come after it |
-| **M4+** | EHR integrations, analytics, payments |
+| **M2b** | Phone number, real calls, speech in and out, transfers: steps 1 to 3 built, the rest in [telephony-voice.md](telephony-voice.md) |
+| **M3** | Appointments (book, cancel, reschedule) in our own database: **built** (staff API, the AI receptionist's booking tools, web screens, real-model evaluation); see [scheduling.md](scheduling.md). SMS confirmations come after it |
+| **M4+** | EHR integrations (design: [ehr-integration.md](ehr-integration.md), proposed), analytics, payments. The whole plan: [../roadmap.md](../roadmap.md) |
 
 The brain is built and tested in text first: safety, answering only from approved facts and tool rules are the risky parts, and they are far cheaper to test without a phone line. The phone then connects to the same brain.
 

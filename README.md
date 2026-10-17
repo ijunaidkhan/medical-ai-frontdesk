@@ -9,7 +9,8 @@ Multi-tenant SaaS AI medical receptionist. See [CLAUDE.md](CLAUDE.md) for produc
 | `apps/web` | Angular web app |
 | `apps/api` | NestJS API |
 | `packages/shared` | TypeScript types and constants shared by web and API (`@frontdesk/shared`) |
-| `docs/architecture` | Design notes: [authentication](docs/architecture/authentication.md), [authorization](docs/architecture/authorization.md), [web app](docs/architecture/web-app.md) |
+| `docs/architecture` | Design notes: [authentication](docs/architecture/authentication.md), [authorization](docs/architecture/authorization.md), [web app](docs/architecture/web-app.md), [AI receptionist](docs/architecture/ai-receptionist.md), [phone calls](docs/architecture/telephony-voice.md), [scheduling](docs/architecture/scheduling.md), [EHR integration (proposed)](docs/architecture/ehr-integration.md) |
+| `docs/roadmap.md` | What is built, what is next, and what must happen before real patients |
 
 ## Getting started
 

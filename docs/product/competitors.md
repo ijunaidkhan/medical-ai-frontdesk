@@ -36,9 +36,9 @@ Healthcare AI receptionists are a crowded, well-funded category: Assort Health (
 
 **Not built yet (what competitors sell)**
 
-- Booking, rescheduling and cancelling appointments (milestone 3), with calendar or EHR connection so the AI sees real availability.
+- A **calendar or EHR connection** so the AI sees a clinic's real availability. Booking, rescheduling and cancelling are built (milestone 3) on our own calendar; the EHR connection is designed, not built: [ehr-integration.md](../architecture/ehr-integration.md).
 - Insurance verification, payments, SMS reminders and confirmations.
-- Real phone numbers and live calls (milestone 2b, in progress; the live-session part is built, real telephony is not connected).
+- Real phone numbers and live calls (milestone 2b, in progress; the live-session part and a browser "web phone" for development are built, real telephony is not connected). The plan: [roadmap.md](../roadmap.md).
 - More than English.
 - Compliance certification (SOC 2 and similar) and signed vendor agreements for every provider that touches call content.
 - Review, task-queue and analytics screens (planned).
