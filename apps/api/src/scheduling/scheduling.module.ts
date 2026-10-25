@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AppointmentsController } from './appointments.controller.js';
 import { AppointmentsService } from './appointments.service.js';
+import { NativeAdapter } from './gateway/native-adapter.js';
+import { SchedulingGateways } from './gateway/scheduling-gateways.js';
 import { PatientsController } from './patients.controller.js';
 import { PatientsService } from './patients.service.js';
 import {
@@ -23,7 +25,7 @@ import { SchedulingService } from './scheduling.service.js';
     PatientsController,
     AppointmentsController,
   ],
-  providers: [SchedulingService, PatientsService, AppointmentsService],
-  exports: [SchedulingService, PatientsService, AppointmentsService],
+  providers: [SchedulingService, PatientsService, AppointmentsService, NativeAdapter, SchedulingGateways],
+  exports: [SchedulingService, PatientsService, AppointmentsService, SchedulingGateways],
 })
 export class SchedulingModule {}

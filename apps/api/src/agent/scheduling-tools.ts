@@ -1,15 +1,16 @@
 import { createHash } from 'node:crypto';
 import { BadRequestException, ConflictException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
-import type { IdentityCheck, TimeFormat } from '@frontdesk/shared';
+import type { AvailabilitySlot, IdentityCheck, TimeFormat } from '@frontdesk/shared';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { sql, type Transaction } from 'kysely';
 import { writeAuditLog } from '../audit/audit-log.js';
 import type { Database } from '../database/database.types.js';
 import { CreatePatientDto, PatientIdentityDto } from '../scheduling/appointments.dto.js';
-import { bookedSentence, cancelledSentence, clockParts, formatWhen, listSentence, movedSentence, oneLine, type AppointmentFacts } from '../scheduling/appointment-text.js';
-import { AppointmentsService, CancellationWindowError } from '../scheduling/appointments.service.js';
-import { PatientsService } from '../scheduling/patients.service.js';
+import { bookedSentence, cancelledSentence, clockParts, formatWhen, listSentence, movedSentence, oneLine } from '../scheduling/appointment-text.js';
+import { CancellationWindowError } from '../scheduling/appointments.service.js';
+import type { GatewayScope, SchedulingGateway } from '../scheduling/gateway/scheduling-gateway.js';
+import { SchedulingGateways } from '../scheduling/gateway/scheduling-gateways.js';
 import { SchedulingService } from '../scheduling/scheduling.service.js';
 import { localDate, zonedInstant } from '../scheduling/zoned-time.js';
 import type { ModelToolDefinition } from './model/language-model.js';
@@ -191,10 +192,16 @@ interface IssuedAppointment {
   label: string;
 }
 
+/** The practice's calendar for one tool call: where it lives, and the scope it is used in. */
+interface Calendar {
+  gateway: SchedulingGateway;
+  scope: GatewayScope;
+}
+
 /**
  * The scheduling tools of the AI receptionist. Each one validates what the model asked for, then does
- * its narrow job through the same services the staff screens use, inside the practice-scoped transaction
- * it is given. The model never supplies a practice, patient, provider, appointment or time: only short
+ * its narrow job through the practice's scheduling gateway (our own calendar today, an EHR later), inside
+ * the practice-scoped transaction it is given. The model never supplies a practice, patient, provider, appointment or time: only short
  * codes that this conversation's own earlier tool results issued. Where a tool states a fact about an
  * appointment, it hands the sentence to the backend's line list (`runtime.state.lines`), which becomes
  * the whole reply for that turn.
@@ -203,8 +210,7 @@ interface IssuedAppointment {
 export class SchedulingTools {
   constructor(
     private readonly scheduling: SchedulingService,
-    private readonly appointments: AppointmentsService,
-    private readonly patients: PatientsService,
+    private readonly gateways: SchedulingGateways,
   ) {}
 
   definitions(identityCheck: IdentityCheck): ModelToolDefinition[] {
@@ -222,21 +228,23 @@ export class SchedulingTools {
       return rejected({ error: 'Booking by the assistant is not available right now. Offer to take a message for the team with create_staff_task.' });
     }
     const format = settings.timeFormat;
+    const scope: GatewayScope = { trx, practiceId: runtime.practiceId, meta: runtime.meta };
+    const calendar: Calendar = { gateway: await this.gateways.forPractice(scope), scope };
     switch (name) {
       case 'list_appointment_types':
-        return this.listTypes(trx);
+        return this.listTypes(calendar);
       case 'find_available_slots':
-        return this.findSlots(trx, runtime, args, format);
+        return this.findSlots(calendar, runtime, args, format);
       case 'verify_patient':
-        return this.verify(trx, runtime, args, settings.identityFailureCapPerHour, format, settings.identityCheck);
+        return this.verify(calendar, runtime, args, settings.identityFailureCapPerHour, format, settings.identityCheck);
       case 'book_appointment':
-        return this.book(trx, runtime, args, format, settings.identityCheck, settings.identityFailureCapPerHour);
+        return this.book(calendar, runtime, args, format, settings.identityCheck, settings.identityFailureCapPerHour);
       case 'list_my_appointments':
-        return this.listMine(trx, runtime, format);
+        return this.listMine(calendar, runtime, format);
       case 'cancel_appointment':
-        return this.cancel(trx, runtime, args, format);
+        return this.cancel(calendar, runtime, args, format);
       case 'reschedule_appointment':
-        return this.reschedule(trx, runtime, args, format);
+        return this.reschedule(calendar, runtime, args, format);
       default:
         return rejected({ error: 'Unknown tool' });
     }
@@ -244,37 +252,18 @@ export class SchedulingTools {
 
   // ---------------------------------------------------------- finding times
 
-  /** The visit types a caller can book: active, with at least one active provider who offers them. */
-  private bookableTypes(trx: Trx) {
-    return trx
-      .selectFrom('appointment_types as t')
-      .select(['t.id', 't.name', 't.duration_minutes'])
-      .where('t.active', '=', true)
-      .where((eb) =>
-        eb.exists(
-          eb
-            .selectFrom('provider_appointment_types as link')
-            .innerJoin('providers as p', 'p.id', 'link.provider_id')
-            .select('link.provider_id')
-            .whereRef('link.appointment_type_id', '=', 't.id')
-            .where('p.active', '=', true),
-        ),
-      )
-      .orderBy('t.name')
-      .limit(30)
-      .execute();
-  }
-
-  private async listTypes(trx: Trx): Promise<ToolResult> {
-    const types = await this.bookableTypes(trx);
+  private async listTypes({ gateway, scope }: Calendar): Promise<ToolResult> {
+    const types = await gateway.listVisitTypes(scope);
     if (types.length === 0) {
       return { status: 'ok', result: { types: [], note: 'There is nothing to book right now. Offer to take a message for the team.' } };
     }
-    return { status: 'ok', result: { types: types.map((type) => ({ name: oneLine(type.name), lengthMinutes: type.duration_minutes })) } };
+    return { status: 'ok', result: { types: types.map((type) => ({ name: oneLine(type.name), lengthMinutes: type.durationMinutes })) } };
   }
 
-  private async findSlots(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat): Promise<ToolResult> {
-    const types = await this.bookableTypes(trx);
+  private async findSlots(calendar: Calendar, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat): Promise<ToolResult> {
+    const { gateway, scope } = calendar;
+    const { trx } = scope;
+    const types = await gateway.listVisitTypes(scope);
     const wanted = argText(args, 'appointmentType');
     // Only a code of the caller's own appointments (M1, M2...) means "moving"; anything else in that field (a small
     // model put a time's code, S1, there) is ignored, so a plain search is not mistaken for a move.
@@ -284,11 +273,11 @@ export class SchedulingTools {
       // Moving an appointment: search for the same kind of visit as the caller's own appointment with that code.
       const who = await this.requireVerified(trx, runtime);
       if ('status' in who) return who;
-      const own = await this.ownAppointment(trx, runtime, who.patientId, appointmentCode);
+      const own = await this.ownAppointment(calendar, runtime, who.patientId, appointmentCode);
       if (!own) {
         return rejected({ error: 'That is not one of the caller\'s appointments listed in this conversation. Use list_my_appointments first.' });
       }
-      type = types.find((candidate) => candidate.id === own.appointment_type_id);
+      type = types.find((candidate) => candidate.id === own.appointmentTypeId);
     } else if (wanted) {
       type = matchType(types, wanted);
     } else if (types.length === 1) {
@@ -319,12 +308,12 @@ export class SchedulingTools {
       if (startOfDay.getTime() > from.getTime()) from = startOfDay;
     }
     const to = new Date(from.getTime() + SEARCH_DAYS * DAY);
-    const found = await this.scheduling.findSlots(trx, runtime.practiceId, { appointmentTypeId: type.id, from, to, limit: SEARCH_LIMIT, now });
+    const found = await gateway.findSlots(scope, { appointmentTypeId: type.id, from, to, limit: SEARCH_LIMIT, now });
 
     // A handful of real options, spread over a few days rather than the first five of one morning.
     const perDay = new Map<string, number>();
-    const chosen: typeof found.slots = [];
-    for (const slot of found.slots) {
+    const chosen: AvailabilitySlot[] = [];
+    for (const slot of found) {
       const startsAt = new Date(slot.startsAt);
       const { hour } = clockParts(startsAt, timeZone);
       if ((timeOfDay === 'morning' && hour >= 12) || (timeOfDay === 'afternoon' && hour < 12)) continue;
@@ -358,7 +347,7 @@ export class SchedulingTools {
       status: 'ok',
       result: {
         slots: chosen.map((_slot, index) => ({ code: issuedNow[index]!.code, ...wording[index]! })),
-        lengthMinutes: type.duration_minutes,
+        lengthMinutes: type.durationMinutes,
         note: 'Offer these times exactly as written (the "when" and "provider" words) and let the caller choose. Do not say any other time.',
       },
       // What is kept for later steps (which code is which time and provider) is not shown to the model.
@@ -368,7 +357,8 @@ export class SchedulingTools {
 
   // ----------------------------------------------------------- who is calling
 
-  private async verify(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, capPerHour: number, format: TimeFormat, identityCheck: IdentityCheck): Promise<ToolResult> {
+  private async verify(calendar: Calendar, runtime: ToolRuntime, args: Record<string, unknown>, capPerHour: number, format: TimeFormat, identityCheck: IdentityCheck): Promise<ToolResult> {
+    const { trx } = calendar.scope;
     // Locked: no more checks in this conversation, and no hint of what was wrong with any earlier one.
     if (await this.isLocked(trx, runtime)) return rejected(LOCKED);
     const strict = identityCheck === 'name_dob_phone';
@@ -386,9 +376,10 @@ export class SchedulingTools {
     if (await this.capReached(trx, runtime, capPerHour)) return rejected(UNAVAILABLE);
 
     // The one patient with these details. With name and birth date alone, two patients who share both are never told apart by a guess.
-    const patient = strict
-      ? await this.patients.findMatch(trx, details.dto as CreatePatientDto)
-      : await this.patients.findByNameAndBirth(trx, `${details.dto.firstName} ${details.dto.lastName}`, details.dto.dateOfBirth);
+    const patient = await calendar.gateway.findPatient(
+      calendar.scope,
+      strict ? (details.dto as CreatePatientDto) : { fullName: `${details.dto.firstName} ${details.dto.lastName}`, dateOfBirth: details.dto.dateOfBirth },
+    );
     if (patient) {
       await trx.updateTable('conversations').set({ verified_patient_id: patient.id }).where('id', '=', runtime.conversationId).execute();
       await writeAuditLog(trx, {
@@ -404,7 +395,7 @@ export class SchedulingTools {
       });
       // A caller who is identified almost always wants their appointments next: the system reads them out at once,
       // which saves a small model two steps (and the codes M1, M2... are ready for cancelling or moving).
-      const listed = await this.listMine(trx, runtime, format);
+      const listed = await this.listMine(calendar, runtime, format);
       return {
         status: 'ok',
         result: { matched: true, ...listed.result, note: 'The caller is identified. The system reads them their appointments. Use the codes if they want to cancel or move one.' },
@@ -505,42 +496,36 @@ export class SchedulingTools {
 
   // ------------------------------------------------------------------ booking
 
-  private async book(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat, identityCheck: IdentityCheck, capPerHour: number): Promise<ToolResult> {
+  private async book(calendar: Calendar, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat, identityCheck: IdentityCheck, capPerHour: number): Promise<ToolResult> {
+    const { gateway, scope } = calendar;
+    const { trx } = scope;
     const code = argText(args, 'slotCode');
     const offered = await this.issued<IssuedSlot>(trx, runtime.conversationId, SLOT_SOURCES, 'slots');
     const slot = code === undefined ? undefined : offered.find((candidate) => candidate.code.toLowerCase() === code.toLowerCase());
     if (!slot) {
       // Say exactly what to do next: small models otherwise tell the caller there are no times.
       if (offered.length === 0) {
-        const types = (await this.bookableTypes(trx)).map((type) => type.name);
+        const types = (await gateway.listVisitTypes(scope)).map((type) => type.name);
         return rejected({ error: `No times have been offered yet in this conversation. First call find_available_slots (the kinds of visit are: ${types.join(', ')}), read the caller the times it returns, and let them choose.` });
       }
       return rejected({ error: `That is not one of the times offered. Use one of these codes: ${offered.map((candidate) => `${candidate.code} = ${candidate.label}`).join('; ')}.` });
     }
-    const who = await this.patientForBooking(trx, runtime, args, identityCheck, capPerHour);
+    const who = await this.patientForBooking(calendar, runtime, args, identityCheck, capPerHour);
     if ('status' in who) return who;
 
-    const outcome = await this.attempt(trx, async () => {
-      const patientId = 'patientId' in who ? who.patientId : (await this.patients.findOrCreateInTransaction(trx, runtime.practiceId, { kind: 'ai' }, who.dto, runtime.meta)).patient.id;
-      return this.appointments.bookInTransaction(
-        trx,
-        runtime.practiceId,
-        { kind: 'ai' },
-        {
-          patientId,
-          providerId: slot.providerId,
-          appointmentTypeId: slot.appointmentTypeId,
-          startsAt: new Date(slot.startsAt),
-          idempotencyKey: idempotencyKey(runtime.conversationId, 'book', slot.code),
-          conversationId: runtime.conversationId,
-        },
-        runtime.meta,
-        'caller',
-      );
-    });
+    const outcome = await this.attempt(trx, () =>
+      gateway.book(scope, {
+        patient: 'patientId' in who ? { id: who.patientId } : { create: who.dto },
+        providerId: slot.providerId,
+        appointmentTypeId: slot.appointmentTypeId,
+        startsAt: new Date(slot.startsAt),
+        idempotencyKey: idempotencyKey(runtime.conversationId, 'book', slot.code),
+        conversationId: runtime.conversationId,
+      }),
+    );
     if (!outcome.ok) return this.refusal(outcome.error, 'booked');
 
-    this.say(runtime, bookedSentence(await this.factsOf(trx, outcome.value.appointmentId), runtime.context.practice.timezone, format));
+    this.say(runtime, bookedSentence(outcome.value.facts, runtime.context.practice.timezone, format));
     return { status: 'ok', result: { booked: true, note: 'The system will tell the caller. Do not say anything about the booking yourself.' } };
   }
 
@@ -552,12 +537,13 @@ export class SchedulingTools {
    * goes into a tool result.
    */
   private async patientForBooking(
-    trx: Trx,
+    { gateway, scope }: Calendar,
     runtime: ToolRuntime,
     args: Record<string, unknown>,
     identityCheck: IdentityCheck,
     capPerHour: number,
   ): Promise<{ patientId: string } | { dto: CreatePatientDto } | ToolResult> {
+    const { trx } = scope;
     const incomplete = (problems: string[]) => rejected({ error: 'Those details are not complete or not valid. Ask the caller again for the missing ones.', problems });
     if (identityCheck === 'name_dob_phone') {
       const details = this.details(args);
@@ -575,7 +561,7 @@ export class SchedulingTools {
     // and a stranger counts as a failed check below.
     if (await this.isLocked(trx, runtime)) return rejected(LOCKED);
     if (await this.capReached(trx, runtime, capPerHour)) return rejected(UNAVAILABLE);
-    const existing = await this.patients.findByNameAndBirth(trx, `${firstName} ${lastName}`, dateOfBirth);
+    const existing = await gateway.findPatient(scope, { fullName: `${firstName} ${lastName}`, dateOfBirth });
     if (existing) return { patientId: existing.id };
 
     // Not on file. Counted once per name and birth date in a conversation, so retrying after a misheard number costs nothing.
@@ -617,35 +603,26 @@ export class SchedulingTools {
 
   // ------------------------------------------------- seeing and changing own
 
-  private async listMine(trx: Trx, runtime: ToolRuntime, format: TimeFormat): Promise<ToolResult> {
+  private async listMine({ gateway, scope }: Calendar, runtime: ToolRuntime, format: TimeFormat): Promise<ToolResult> {
+    const { trx } = scope;
     const who = await this.requireVerified(trx, runtime);
     if ('status' in who) return who;
-    const rows = await trx
-      .selectFrom('appointments')
-      .select('id')
-      .where('patient_id', '=', who.patientId)
-      .where('status', '=', 'booked')
-      .where('starts_at', '>', sql<Date>`now()`)
-      .orderBy('starts_at')
-      .orderBy('id')
-      .limit(SLOTS_OFFERED)
-      .execute();
+    const upcoming = await gateway.listAppointments(scope, who.patientId, SLOTS_OFFERED);
     const timeZone = runtime.context.practice.timezone;
     // An appointment listed earlier in the conversation keeps its code, so "M1" never changes meaning.
     const earlier = await this.issued<IssuedAppointment>(trx, runtime.conversationId, APPOINTMENT_SOURCES, 'appointments');
     let next = earlier.reduce((highest, item) => Math.max(highest, Number(item.code.slice(1)) || 0), 0);
-    const facts: AppointmentFacts[] = [];
-    const issuedNow: IssuedAppointment[] = [];
-    for (const [index, row] of rows.entries()) {
-      facts.push(await this.factsOf(trx, row.id));
-      const code = earlier.find((item) => item.appointmentId === row.id)?.code ?? `M${(next += 1)}`;
-      issuedNow.push({ code, appointmentId: row.id, label: `${oneLine(facts[index]!.typeName)} with ${oneLine(facts[index]!.providerName)} on ${formatWhen(facts[index]!.startsAt, timeZone, format)}` });
-    }
+    const facts = upcoming.map((appointment) => appointment.facts);
+    const issuedNow: IssuedAppointment[] = upcoming.map(({ id, facts: fact }) => ({
+      code: earlier.find((item) => item.appointmentId === id)?.code ?? `M${(next += 1)}`,
+      appointmentId: id,
+      label: `${oneLine(fact.typeName)} with ${oneLine(fact.providerName)} on ${formatWhen(fact.startsAt, timeZone, format)}`,
+    }));
     this.say(runtime, listSentence(facts, timeZone, format));
     return {
       status: 'ok',
       result: {
-        count: rows.length,
+        count: upcoming.length,
         appointments: facts.map((fact, index) => ({ code: issuedNow[index]!.code, visit: oneLine(fact.typeName), provider: oneLine(fact.providerName), when: formatWhen(fact.startsAt, timeZone, format) })),
         note: 'The system will read the list to the caller. Do not repeat it. Use the codes if the caller wants to cancel or move one.',
       },
@@ -654,33 +631,33 @@ export class SchedulingTools {
   }
 
   /** The appointment a code stands for, if it is one of the verified caller's own (anything else looks like "not found"). */
-  private async ownAppointment(trx: Trx, runtime: ToolRuntime, patientId: string, code: string | undefined) {
-    const issued = code === undefined ? undefined : (await this.issued<IssuedAppointment>(trx, runtime.conversationId, APPOINTMENT_SOURCES, 'appointments')).find((candidate) => candidate.code.toLowerCase() === code.toLowerCase());
+  private async ownAppointment({ gateway, scope }: Calendar, runtime: ToolRuntime, patientId: string, code: string | undefined) {
+    const issued = code === undefined ? undefined : (await this.issued<IssuedAppointment>(scope.trx, runtime.conversationId, APPOINTMENT_SOURCES, 'appointments')).find((candidate) => candidate.code.toLowerCase() === code.toLowerCase());
     if (!issued) return null;
-    const row = await trx.selectFrom('appointments').select(['id', 'patient_id', 'appointment_type_id']).where('id', '=', issued.appointmentId).executeTakeFirst();
-    return row && row.patient_id === patientId ? row : null;
+    const appointment = await gateway.getAppointment(scope, issued.appointmentId);
+    return appointment && appointment.patientId === patientId ? appointment : null;
   }
 
-  private async cancel(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat): Promise<ToolResult> {
-    const who = await this.requireVerified(trx, runtime);
+  private async cancel(calendar: Calendar, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat): Promise<ToolResult> {
+    const { gateway, scope } = calendar;
+    const who = await this.requireVerified(scope.trx, runtime);
     if ('status' in who) return who;
-    const own = await this.ownAppointment(trx, runtime, who.patientId, argText(args, 'appointmentCode'));
+    const own = await this.ownAppointment(calendar, runtime, who.patientId, argText(args, 'appointmentCode'));
     if (!own) {
       return rejected({ error: 'That is not one of the caller\'s appointments listed in this conversation. Use list_my_appointments first.' });
     }
-    const facts = await this.factsOf(trx, own.id);
-    const outcome = await this.attempt(trx, () =>
-      this.appointments.cancelInTransaction(trx, runtime.practiceId, { kind: 'ai' }, own.id, 'Cancelled by the caller through the AI receptionist', runtime.meta, 'caller'),
-    );
+    const outcome = await this.attempt(scope.trx, () => gateway.cancel(scope, own.id, 'Cancelled by the caller through the AI receptionist'));
     if (!outcome.ok) return this.refusal(outcome.error, 'cancelled');
-    this.say(runtime, cancelledSentence(facts, runtime.context.practice.timezone, format));
+    this.say(runtime, cancelledSentence(own.facts, runtime.context.practice.timezone, format));
     return { status: 'ok', result: { cancelled: true, note: 'The system will tell the caller. Do not say anything about the cancellation yourself.' } };
   }
 
-  private async reschedule(trx: Trx, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat): Promise<ToolResult> {
+  private async reschedule(calendar: Calendar, runtime: ToolRuntime, args: Record<string, unknown>, format: TimeFormat): Promise<ToolResult> {
+    const { gateway, scope } = calendar;
+    const { trx } = scope;
     const who = await this.requireVerified(trx, runtime);
     if ('status' in who) return who;
-    const own = await this.ownAppointment(trx, runtime, who.patientId, argText(args, 'appointmentCode'));
+    const own = await this.ownAppointment(calendar, runtime, who.patientId, argText(args, 'appointmentCode'));
     if (!own) {
       return rejected({ error: 'That is not one of the caller\'s appointments listed in this conversation. Use list_my_appointments first.' });
     }
@@ -689,22 +666,19 @@ export class SchedulingTools {
     if (!slot) {
       return rejected({ error: 'That is not one of the times offered in this conversation. Use find_available_slots for the same kind of visit and offer one of those.' });
     }
-    if (slot.appointmentTypeId !== own.appointment_type_id) {
+    if (slot.appointmentTypeId !== own.appointmentTypeId) {
       return rejected({ error: 'That time is for a different kind of visit. Search again for the same kind of visit as the appointment being moved.' });
     }
     const outcome = await this.attempt(trx, () =>
-      this.appointments.rescheduleInTransaction(
-        trx,
-        runtime.practiceId,
-        { kind: 'ai' },
-        own.id,
-        { startsAt: new Date(slot.startsAt), providerId: slot.providerId, idempotencyKey: idempotencyKey(runtime.conversationId, 'move', own.id, slot.code), conversationId: runtime.conversationId },
-        runtime.meta,
-        'caller',
-      ),
+      gateway.reschedule(scope, own.id, {
+        startsAt: new Date(slot.startsAt),
+        providerId: slot.providerId,
+        idempotencyKey: idempotencyKey(runtime.conversationId, 'move', own.id, slot.code),
+        conversationId: runtime.conversationId,
+      }),
     );
     if (!outcome.ok) return this.refusal(outcome.error, 'moved');
-    this.say(runtime, movedSentence(await this.factsOf(trx, outcome.value.appointmentId), runtime.context.practice.timezone, format));
+    this.say(runtime, movedSentence(outcome.value.facts, runtime.context.practice.timezone, format));
     return { status: 'ok', result: { moved: true, note: 'The system will tell the caller. Do not say anything about the change yourself.' } };
   }
 
@@ -793,11 +767,6 @@ export class SchedulingTools {
       return rejected({ reason: 'not_possible', error: `That could not be ${action}. Nothing was changed. Offer to take a message for the team.` });
     }
     throw error;
-  }
-
-  private async factsOf(trx: Trx, appointmentId: string): Promise<AppointmentFacts> {
-    const appointment = await this.appointments.load(trx, appointmentId);
-    return { typeName: appointment.appointmentTypeName, providerName: appointment.providerName, startsAt: new Date(appointment.startsAt) };
   }
 
   /** Everything of one kind that this conversation's earlier tool results issued, oldest first. */

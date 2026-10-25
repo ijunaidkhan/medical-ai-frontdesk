@@ -11,9 +11,10 @@ Status: **2026-10-18.** One place for what is built, what comes next, what block
 | **M3 Scheduling** | Providers, visit types, rules and open times in our own database; staff and AI can book, cancel and move; confirmations written by the backend; the Schedule and Scheduling setup pages; a real-model evaluation | [scheduling](architecture/scheduling.md), [evaluation](evaluations/ai-scheduling-llama3.2-3b.md) |
 | **M2b Phone calls (steps 1 to 3)** | Phone numbers per practice, the incoming-call webhook with signature check, the live voice session | [telephony-voice](architecture/telephony-voice.md) |
 | **The web phone** | A browser page to talk to the real receptionist by voice, for development (no phone provider needed) | [telephony-voice](architecture/telephony-voice.md) |
+| **EHR groundwork (step 1)** | The AI's scheduling tools reach the calendar through one gateway, with our own calendar behind it and a contract test suite every future EHR adapter must pass. No change in behaviour | [ehr-integration](architecture/ehr-integration.md) |
 | **Contacting callers by date of birth** | Messages and identity checks use name and date of birth; the backend finds the callback number (caller ID, patient record, or a number already said); two settings per practice | [ai-receptionist](architecture/ai-receptionist.md), [scheduling](architecture/scheduling.md) |
 
-Quality today: **1,080 unit, 30 end-to-end and 1,079 integration tests on the API, 394 on the web app**, plus the real-model evaluation (`npm run eval:scheduling`), which has shown **no safety violation** in any run. New rules are checked by breaking them on purpose and confirming a test fails.
+Quality today: **1,080 unit, 30 end-to-end and 1,093 integration tests on the API, 394 on the web app**, plus the real-model evaluation (`npm run eval:scheduling`), which has shown **no safety violation** in any run. New rules are checked by breaking them on purpose and confirming a test fails.
 
 ## What comes next, in order
 
@@ -21,8 +22,8 @@ Sizes are relative (small, medium, large), not time estimates.
 
 | # | Work | Size | Needs a decision first? |
 |---|---|---|---|
-| 1 | **EHR groundwork:** a `SchedulingGateway` interface, our own calendar behind it, a connection table, tiers, a status screen. No change in behaviour | large | No. Design: [ehr-integration](architecture/ehr-integration.md) (awaiting approval) |
-| 2 | **A FHIR adapter** against a local test FHIR server with synthetic patients | large | No |
+| 1 | ~~**EHR groundwork:** a `SchedulingGateway` interface and our own calendar behind it, with contract tests. No change in behaviour~~ **Done 2026-10-25** | large | Design: [ehr-integration](architecture/ehr-integration.md) |
+| 2 | **A FHIR adapter** against a local test FHIR server with synthetic patients, passing the same contract tests; with it the connection table, capabilities, tiers and a status screen | large | No |
 | 3 | **Phone, steps 4 and 5:** hand-over to a person, end-of-call clean-up (a call cut off by a restart stays "Still going" today), limits | medium | No (testable with the web phone and automated tests) |
 | 4 | **AI monitoring dashboard:** conversations, outcomes, emergencies, tasks, replies the safety checks stopped, reply time | medium | No (the data already exists) |
 | 5 | **The first vendor adapter** (athenahealth, Epic, Oracle Health...) | large | **Yes: which clinics, which EHR** |

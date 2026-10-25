@@ -6,7 +6,7 @@ import { sql, type Transaction } from 'kysely';
 import type { RequestMeta } from '../common/request-meta.js';
 import type { Database } from '../database/database.types.js';
 import { KnowledgeRetriever } from '../knowledge/retriever.js';
-import { PatientsService } from '../scheduling/patients.service.js';
+import { SchedulingGateways } from '../scheduling/gateway/scheduling-gateways.js';
 import { CreateTaskDto } from '../tasks/tasks.dto.js';
 import { TasksService } from '../tasks/tasks.service.js';
 import type { ModelToolDefinition } from './model/language-model.js';
@@ -168,7 +168,7 @@ export class AgentTools {
     private readonly retriever: KnowledgeRetriever,
     private readonly tasks: TasksService,
     private readonly scheduling: SchedulingTools,
-    private readonly patients: PatientsService,
+    private readonly gateways: SchedulingGateways,
   ) {}
 
   /** The scheduling tools exist only in a normal conversation, and only while the practice has booking switched on. */
@@ -321,7 +321,8 @@ export class AgentTools {
     if (call.caller_number) {
       return { phone: call.caller_number, dateOfBirth, note: 'Tell the caller the team will call them back on the number they are calling from. Do not say the number.' };
     }
-    const patient = await this.patients.findByNameAndBirth(trx, name, dateOfBirth);
+    const scope = { trx, practiceId: runtime.practiceId, meta: runtime.meta };
+    const patient = await (await this.gateways.forPractice(scope)).findPatient(scope, { fullName: name, dateOfBirth });
     if (patient) {
       return { phone: patient.phone, dateOfBirth, note: 'Tell the caller the team will call them back on the number the practice has on file for them. Do not say the number.' };
     }

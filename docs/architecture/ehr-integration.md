@@ -1,6 +1,6 @@
 # EHR integration (milestone 4): proposal
 
-Status: **proposed 2026-10-18, waiting for the operator's approval. Nothing in this document is built yet.** It changes the plan in [scheduling.md](scheduling.md): for a clinic that uses an EHR, the EHR, not our database, must be the source of truth for patients and appointments. The whole plan is in [../roadmap.md](../roadmap.md).
+Status: **proposed 2026-10-18. Step 1 (the gateway and our own calendar behind it) built 2026-10-25; no EHR is connected yet.** It changes the plan in [scheduling.md](scheduling.md): for a clinic that uses an EHR, the EHR, not our database, must be the source of truth for patients and appointments. The whole plan is in [../roadmap.md](../roadmap.md).
 
 Everything said here about EHR vendors comes from public articles and vendor pages (listed at the end). It is **indicative**: each vendor's current rules must be checked in its own documentation before anything is built for it.
 
@@ -56,39 +56,46 @@ AI tools (unchanged)
 
 ### The interface
 
-Derived from what the AI tools call today (`agent/scheduling-tools.ts` calling `scheduling.findSlots`, `patients.findByNameAndBirth` / `findMatch` / `findOrCreateInTransaction`, `appointments.bookInTransaction` / `cancelInTransaction` / `rescheduleInTransaction` and `appointments.load`):
+Built in `apps/api/src/scheduling/gateway/scheduling-gateway.ts`, from what the AI tools needed (`agent/scheduling-tools.ts`, and the callback-number lookup in `agent/tools.ts`):
 
 | Method | Meaning |
 |---|---|
-| `capabilities()` | What this adapter can do for this clinic: read availability, find a patient, create a patient, book, cancel, reschedule, hold a slot. The AI is only offered what the clinic's tier and the adapter both allow |
-| `findSlots(query)` | Open times for a visit type, optionally one provider, from a date, with a time-of-day preference |
-| `findPatient(name, dateOfBirth)` | The one matching patient, or none (two matches are never guessed between) |
+| `listVisitTypes()` | The visit types a caller can book |
+| `findSlots(query)` | Open times for a visit type in a window, earliest first, under the practice's rules for callers |
+| `findPatient(name and date of birth, or all four details)` | The one matching patient (id and the number on file), or none (two matches are never guessed between) |
 | `listAppointments(patient)` | The patient's upcoming appointments |
-| `book(patient or new patient, slot, idempotencyKey)` | Create the appointment; returns its reference |
+| `getAppointment(id)` | One appointment, to check it is the caller's own and to word the confirmation |
+| `book(patient or new patient, slot, idempotencyKey)` | Create the appointment; returns it |
 | `cancel(appointment, reason)` | Cancel |
 | `reschedule(appointment, slot, idempotencyKey)` | Move |
+| `capabilities()` (step 2) | What this adapter can do for this clinic: read availability, find a patient, create a patient, book, cancel, reschedule, hold a slot. The AI is only offered what the clinic's tier and the adapter both allow |
 
-Normalised types: **Slot** (provider reference, visit-type reference, start and end), **PatientRef** (external id and a display name), **AppointmentRef**. The short codes the AI sees (S1, M1...) are still issued per conversation by the backend; what each code stands for (including the EHR's own slot id) is kept in the stored record of the tool call and never shown to the model, as today.
+Every method takes a **scope**: the practice, the request details for audit, and the database transaction the tool runs in. Our own calendar works inside that transaction, so a booking, its audit entry and the record of the tool call commit or roll back together. (It must: the tool locks the conversation row while it checks identity, and a booking in a second transaction would wait on that lock for ever.) An adapter that calls an EHR does not use the transaction for that call; how long a tool may hold the transaction open while it waits on an EHR is decided in step 2.
+
+Adapters report refusals the same way: `ConflictException` when a time is taken or the change cannot be made, `CancellationWindowError` inside the practice's cancellation window, `NotFoundException` or `BadRequestException` otherwise. The tools turn these into the same words for the model whatever the calendar.
+
+Normalised types: **Slot** (provider reference, visit-type reference, start and end), **PatientRef** (id and the number on file, never shown to the model), **AppointmentRecord** (id, patient, visit type, and the facts the backend's sentences use). The short codes the AI sees (S1, M1...) are still issued per conversation by the backend; what each code stands for (including the EHR's own slot id) is kept in the stored record of the tool call and never shown to the model, as today.
 
 ### The adapters
 
-- **NativeAdapter:** wraps the existing services and tables (`providers`, `appointment_types`, `provider_appointment_types`, `patients`, `appointments`) and the pure availability engine (`scheduling/availability.ts`). Behaviour does not change, which is how the 1,000+ existing tests prove the refactor.
+- **NativeAdapter** (built, `scheduling/gateway/native-adapter.ts`): wraps the existing services and tables (`providers`, `appointment_types`, `provider_appointment_types`, `patients`, `appointments`) and the pure availability engine (`scheduling/availability.ts`). Behaviour did not change: every existing test passes unchanged.
 - **FhirAdapter:** FHIR R4 `Schedule`, `Slot`, `Appointment` and `Patient`. The Argonaut scheduling guide also defines `$find`, `$hold` and `$book` operations that a server may support. Many vendors add their own operations or limits on top.
 - **Vendor adapters:** one per EHR, built when a paying clinic needs it (see "What we know about vendors").
-- **Where in the code:** a new folder `apps/api/src/scheduling/gateway/` (the interface, the adapters, and a registry whose `forPractice(practiceId)` returns the clinic's adapter). The AI tools call the gateway instead of the services directly.
+- **Where in the code:** `apps/api/src/scheduling/gateway/`: the interface, the adapters, and a registry (`SchedulingGateways.forPractice(scope)`) that returns the clinic's adapter (always the NativeAdapter until step 2). The AI tools call the gateway instead of the services; the staff screens still use the services directly.
 
 ### How each tool maps
 
 | Tool | Gateway call | Tier needed |
 |---|---|---|
-| `list_appointment_types` | the clinic's mapped visit types (see mapping) | 1 |
-| `find_available_slots` | `findSlots` | 1 |
-| `verify_patient` | `findPatient` | 1 |
+| `list_appointment_types` | `listVisitTypes` (for an EHR: the clinic's mapped visit types, see mapping) | 1 |
+| `find_available_slots` | `findSlots` (and `getAppointment` when moving) | 1 |
+| `verify_patient` | `findPatient`, then `listAppointments` | 1 |
 | `list_my_appointments` | `listAppointments` | 1 |
 | `book_appointment` | `book` (with `findPatient`; a new patient only if the adapter can create one) | 2 |
-| `cancel_appointment` | `cancel` | 2 |
-| `reschedule_appointment` | `reschedule` | 2 |
-| `create_staff_task`, `search_knowledge`, hand-off, end | not related to the EHR | 0 |
+| `cancel_appointment` | `getAppointment`, `cancel` | 2 |
+| `reschedule_appointment` | `getAppointment`, `reschedule` | 2 |
+| `create_staff_task` | `findPatient`, for the number on file when the call has no caller ID | 0 (uses the EHR only if it can be read) |
+| `search_knowledge`, hand-off, end | not related to the EHR | 0 |
 
 ## Data: what lives where
 
@@ -172,19 +179,19 @@ Integration vendors (Redox, NexHealth and others) can cover several EHRs with on
 1. **A local FHIR server** in Docker (HAPI FHIR, `docker run -p 8080:8080 hapiproject/hapi:latest`) filled with **synthetic patients** (Synthea) and our own `Schedule` and `Slot` seed (doctors, hours, open times). The `FhirAdapter` and its tests run against it. Free, no account, no real data. It is not a real EHR: vendor quirks do not appear.
 2. **Vendor sandboxes** (Epic on FHIR, athenahealth Preview, Oracle's open sandbox), with developer accounts created by the operator. A sandbox does not show what production does; expect surprises at the first clinic.
 3. **A first clinic:** read-only first, then booking after test calls.
-4. **Contract tests:** the same test suite runs against the NativeAdapter and every other adapter, so they all behave the same to the AI. The existing real-model evaluation (`npm run eval:scheduling`) is reused.
+4. **Contract tests** (built: `apps/api/test/support/gateway-contract.ts`, run for the NativeAdapter by `test/scheduling-gateway.int-spec.ts`): visit types, open times, finding a patient, booking once per key, a taken time, a new patient, cancelling, the cancellation window, moving, and practices kept apart. Every adapter runs the same suite, so they all behave the same to the AI. The existing real-model evaluation (`npm run eval:scheduling`) is reused.
 
 ## What changes in our code
 
-- **API:** the gateway folder above; `agent/scheduling-tools.ts` and `agent/agent.service.ts` use it; connection endpoints; a permission for who may change a connection.
-- **Database:** one migration with the tables above. The existing scheduling tables stay and become the NativeAdapter's.
+- **API (step 1, built):** the gateway folder above; `agent/scheduling-tools.ts` and `agent/tools.ts` use it. **Later:** connection endpoints and a permission for who may change a connection.
+- **Database:** one migration with the tables above. The existing scheduling tables stay and are the NativeAdapter's. `conversations.verified_patient_id` points at our `patients` table, so an EHR patient's id needs its own column there.
 - **Web:** an "EHR connection" page (status, mapping, tier). For a clinic on an EHR the Schedule and Providers screens are hidden or read-only, because staff manage the calendar in the EHR.
 - **Unchanged:** the AI tools and prompts, the safety layer, the reply checker, identity rules and failure limits (each check is now an EHR call, and the practice-wide failure cap still counts them), the idempotency rules, tenant isolation, conversation review, tasks, the evaluation tool.
 
 ## Steps (each tested and reported before the next)
 
-1. **Groundwork:** the gateway and NativeAdapter with **no change in behaviour** (every existing test stays green), the connection table, capabilities, the tier setting and a status screen.
-2. **FhirAdapter** on the local FHIR server, with contract tests.
+1. **Groundwork (built 2026-10-25):** the gateway, the NativeAdapter and the contract tests, with **no change in behaviour** (every existing test passes unchanged). No database, API or screen changes.
+2. **FhirAdapter** on the local FHIR server, passing the same contract tests, together with what only matters once there is a second adapter: the connection table, capabilities, the tier setting (today the "Let the AI book" switch is the only one; a second switch beside it now would change behaviour), a status screen, and how long a tool may wait on an EHR.
 3. **The first vendor adapter**, chosen by the first paying clinic: sandbox, then a read-only pilot, then booking.
 4. **The onboarding wizard** and health checks.
 5. **Integration vendors:** evaluated when three or more different EHRs are asked for.
